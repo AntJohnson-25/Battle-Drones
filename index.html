@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hop Drone Racing</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #141822; color: #f6f5ef; font: 15px/1.4 system-ui, sans-serif; overflow: hidden; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+    #hud { position: fixed; top: 12px; left: 12px; display: grid; gap: 6px; pointer-events: none; }
+    #hud .row { display: flex; align-items: center; gap: 8px; background: rgba(20, 24, 34, .7); padding: 4px 10px 4px 4px; border-radius: 999px; }
+    #hud img { width: 28px; height: 28px; border-radius: 50%; background: #2b3245; }
+    #hud .it { color: #c4f35b; font-weight: 700; }
+    #status { position: fixed; bottom: 64px; left: 50%; transform: translateX(-50%); opacity: .75; }
+  </style>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+  <div id="hud"></div>
+  <div id="status">Connecting…</div>
+  <!--
+    The HopLobby SDK. Use the hosted copy so you always get the current v1:
+      <script src="https://hoplobby.com/sdk/v1/hoplobby.js"></script>
+    This starter loads its local copy so it also works offline (standalone mode).
+  -->
+  <script src="./hoplobby.js"></script>
+  <script src="./game.js"></script>
+</body>
+</html>
