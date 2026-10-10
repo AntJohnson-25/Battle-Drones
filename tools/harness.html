@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hop Drone Racing: local lobby harness</title>
+<style>
+  body { margin: 0; background: #111; color: #ddd; font: 13px system-ui, sans-serif; }
+  .bar { padding: 6px 10px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .frames { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; height: calc(100vh - 80px); }
+  iframe { width: 100%; height: 100%; border: 0; background: #000; }
+  #log { height: 40px; overflow: auto; padding: 0 10px; font: 11px monospace; color: #9c9; }
+</style>
+</head>
+<body>
+<!-- Stands in for hoplobby.com: answers the SDK's hello with a lobby context,
+     relays HopLobby.send() between the frames and answers requests. Serve the
+     project folder (not Work/) so this page and the game share an origin:
+       python -m http.server 5173 --bind 127.0.0.1 --directory <project>
+     then open http://127.0.0.1:5173/tools/harness.html -->
+<div class="bar">
+  <button id="join">Second player joins</button>
+  <button id="leaveB">Player B leaves</button>
+  <button id="leaveA">Host A leaves</button>
+  <span id="state"></span>
+</div>
+<div class="frames"><div id="fa"></div><div id="fb"></div></div>
+<div id="log"></div>
+<script>
+(function () {
+  const GAME = "/Work/index.html";
+  const lobby = { code: "TEST01", hostId: "A", players: [] };
+  const frames = {};   // id -> iframe
+  const log = function (s) { const el = document.getElementById("log"); el.textContent = s + "\n" + el.textContent.slice(0, 4000); };
+  window.HL = { lobby: lobby, frames: frames, sent: { A: 0, B: 0 }, errors: [] };
+
+  function players() { return lobby.players.map(function (p) { return { id: p.id, name: p.name, isHost: p.id === lobby.hostId, signedIn: true }; }); }
+  function ctxFor(id) {
+    return { sdk: 1, gameId: "dev", lobbyCode: lobby.code, playerId: id, hostId: lobby.hostId, locale: "en", dev: true, standalone: false,
+      players: players().map(function (p) { return Object.assign(p, { isYou: p.id === id }); }) };
+  }
+  function post(id, msg) { const f = frames[id]; if (f && f.contentWindow) { msg.hl = "site"; f.contentWindow.postMessage(msg, location.origin); } }
+  function idOf(source) { for (const id in frames) if (frames[id].contentWindow === source) return id; return null; }
+  function broadcastPlayers() {
+    for (const id in frames) post(id, { type: "players", players: ctxFor(id).players, hostId: lobby.hostId });
+  }
+  function status() { document.getElementById("state").textContent = "lobby: " + lobby.players.map(function (p) { return p.id + (p.id === lobby.hostId ? "*" : ""); }).join(" "); }
+
+  window.addEventListener("message", function (ev) {
+    const d = ev.data, from = idOf(ev.source);
+    if (!d || d.hl !== "sdk" || !from) return;
+    if (d.type === "hello") post(from, { type: "init", context: ctxFor(from) });
+    else if (d.type === "send") {
+      HL.sent[from] = (HL.sent[from] || 0) + 1;
+      const to = d.to === undefined ? lobby.players.map(function (p) { return p.id; }).filter(function (x) { return x !== from; }) : [].concat(d.to);
+      to.forEach(function (t) { if (frames[t]) post(t, { type: "message", data: JSON.parse(JSON.stringify(d.data)), from: from }); });
+    } else if (d.type === "request") {
+      if (d.method === "avatar" && d.params && d.params.format === "glb") {
+        // The made-up test avatar (tools/make-test-avatar.js), never a real one.
+        HL.avatarRequests = (HL.avatarRequests || 0) + 1;
+        fetch("/tools/test-avatar.glb").then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+          post(from, { type: "response", id: d.id, ok: true, result: buf });
+        }, function (err) { post(from, { type: "response", id: d.id, ok: false, error: String(err) }); });
+      } else post(from, { type: "response", id: d.id, ok: false, error: "harness: no " + d.method });
+    } else if (d.type === "ready") log(from + " ready");
+    else if (d.type === "end") log(from + " ended the game");
+    else if (d.type === "exit") log(from + " back to lobby");
+  });
+
+  function addPlayer(id, name, slot) {
+    lobby.players.push({ id: id, name: name });
+    const f = document.createElement("iframe");
+    f.src = GAME + "?harness=" + id + "&debug=1&nocache=" + Date.now();
+    document.getElementById(slot).appendChild(f);
+    frames[id] = f;
+    f.addEventListener("load", function () {
+      try {
+        f.contentWindow.addEventListener("error", function (e) { HL.errors.push(id + ": " + e.message + " (" + (e.filename || "").split("/").pop() + ":" + e.lineno + ")"); log("ERROR " + id + ": " + e.message); });
+      } catch (e) { /* ignore */ }
+    });
+    broadcastPlayers();
+    status();
+  }
+  function remove(id) {
+    lobby.players = lobby.players.filter(function (p) { return p.id !== id; });
+    if (frames[id]) { frames[id].remove(); delete frames[id]; }
+    if (lobby.hostId === id && lobby.players.length) lobby.hostId = lobby.players[0].id;
+    broadcastPlayers();
+    status();
+  }
+  HL.addPlayer = addPlayer; HL.remove = remove;
+  document.getElementById("join").onclick = function () { if (!frames.B) addPlayer("B", "Joshua", "fb"); };
+  document.getElementById("leaveB").onclick = function () { remove("B"); };
+  document.getElementById("leaveA").onclick = function () { remove("A"); };
+  addPlayer("A", "Ant Dawg", "fa");
+  if (/[?&]both\b/.test(location.search)) addPlayer("B", "Joshua", "fb");
+})();
+</script>
+</body>
+</html>
