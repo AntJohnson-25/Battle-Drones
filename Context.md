@@ -72,6 +72,8 @@ rights; AI-generated is fine if the tool's terms allow commercial use, and it go
 
 ## Next action
 
+**PAUSED 2026-10-09 by the user ("put a pin in it")** after the first playable build. Pick up here:
+
 1. User hand-tests standalone, then in a real Dev Mode lobby (2 profiles) to see real avatars on the stand
    and holding the remote (`?debug=1`).
 2. Tune from that: flight feel, gate sizes, pickup balance, intro camera framing on real avatars.
