@@ -1,8 +1,8 @@
 {
   "name": "hop-drone-racing",
   "private": true,
-  "version": "0.1.0",
-  "description": "Hop Drone Racing, a multiplayer HopLobby game. Currently the Hop Tag starter.",
+  "version": "0.2.0",
+  "description": "Hop Drone Racing, a multiplayer HopLobby game. FPV drone race with pickups.",
   "scripts": {
     "dev": "npx --yes serve -l 5173 ."
   }

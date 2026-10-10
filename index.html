@@ -1,29 +1,103 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Hop Drone Racing</title>
-  <style>
-    html, body { margin: 0; height: 100%; background: #141822; color: #f6f5ef; font: 15px/1.4 system-ui, sans-serif; overflow: hidden; }
-    canvas { display: block; width: 100vw; height: 100vh; }
-    #hud { position: fixed; top: 12px; left: 12px; display: grid; gap: 6px; pointer-events: none; }
-    #hud .row { display: flex; align-items: center; gap: 8px; background: rgba(20, 24, 34, .7); padding: 4px 10px 4px 4px; border-radius: 999px; }
-    #hud img { width: 28px; height: 28px; border-radius: 50%; background: #2b3245; }
-    #hud .it { color: #c4f35b; font-weight: 700; }
-    #status { position: fixed; bottom: 64px; left: 50%; transform: translateX(-50%); opacity: .75; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hop Drone Racing</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23c4f35b'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css?v=1">
 </head>
 <body>
-  <canvas id="stage"></canvas>
-  <div id="hud"></div>
-  <div id="status">Connecting…</div>
-  <!--
-    The HopLobby SDK. Use the hosted copy so you always get the current v1:
-      <script src="https://hoplobby.com/sdk/v1/hoplobby.js"></script>
-    This starter loads its local copy so it also works offline (standalone mode).
-  -->
-  <script src="./hoplobby.js"></script>
-  <script src="./game.js"></script>
+<canvas id="view" aria-label="Race view"></canvas>
+<canvas id="static" width="160" height="90"></canvas>
+<div id="smoke"></div>
+
+<!-- Intro: your pilot on the stand, eyes on the remote -->
+<div id="intro" hidden>
+  <img id="introImg" alt="">
+  <div><div id="introName"></div><div id="introRole"></div><div id="keys"></div></div>
+</div>
+
+<div id="hud" class="off">
+  <div id="tl">
+    <div class="pl"><span id="place"></span><small id="placeOf"></small></div>
+    <div id="lap"></div>
+    <div id="time"></div>
+    <div id="standings"></div>
+  </div>
+  <div id="item"><div id="itemIcon"></div><div id="itemName"></div><kbd id="itemKey"></kbd></div>
+  <canvas id="minimap" width="170" height="170"></canvas>
+  <div id="marker" hidden><i></i><span id="markerDist"></span></div>
+  <div id="osd" hidden>
+    <span class="cross">+</span>
+    <div class="osd-l"><span id="osdBatt"></span><span id="osdAlt"></span></div>
+    <div class="osd-r"><span id="osdSpeed"></span><span>FPV</span></div>
+  </div>
+</div>
+<div id="center"></div>
+<div id="toast"></div>
+<div id="wait" hidden></div>
+
+<div id="results" hidden>
+  <div class="panel">
+    <h2 id="resTitle">RESULTS</h2>
+    <div id="resBody"></div>
+    <div class="btns">
+      <button type="button" id="again">RACE AGAIN</button>
+      <p id="resWait" hidden></p>
+      <button type="button" id="endAll" class="quiet" hidden>END GAME FOR EVERYONE</button>
+      <button type="button" id="backLobby" class="quiet">BACK TO LOBBY</button>
+    </div>
+  </div>
+</div>
+
+<div id="status"></div>
+<div id="debug" hidden></div>
+<div id="err" hidden></div>
+
+<script>
+  window.addEventListener("error", function (e) {
+    var el = document.getElementById("err");
+    el.hidden = false;
+    el.textContent = "Error: " + e.message + " (" + (e.filename || "").split("/").pop() + ":" + e.lineno + ")";
+  });
+</script>
+<script>
+/* The game's scripts, in order. They download in parallel and each one is
+   retried if the network drops it (a dropped file would leave the game half
+   loaded); then they run in this order. hoplobby.js is an unchanged copy of
+   HopLobby SDK v1, so standalone mode also works offline. */
+(function () {
+  var FILES = ["hoplobby.js", "vendor/three.min.js", "vendor/GLTFLoader.js", "src/util.js?v=1", "src/track.js?v=1", "src/sim.js?v=1",
+    "src/net.js?v=1", "src/world.js?v=1", "src/drone.js?v=1", "src/pilot.js?v=1", "src/view.js?v=1", "src/audio.js?v=1",
+    "src/input.js?v=1", "src/hud.js?v=1", "src/main.js?v=1"];
+  function fail(src) {
+    var el = document.getElementById("err");
+    el.hidden = false;
+    el.textContent = "Couldn't download " + src.split("?")[0] + ". Check your connection and reload.";
+  }
+  if (location.protocol === "file:") {
+    FILES.forEach(function (src) { document.write('<script src="' + src + '"><\/script>'); });
+    return;
+  }
+  function get(src, attempt) {
+    var url = attempt ? src + (src.indexOf("?") < 0 ? "?" : "&") + "retry=" + attempt : src;
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.text();
+    }).catch(function () {
+      if (attempt >= 4) { fail(src); throw new Error("gave up on " + src); }
+      return new Promise(function (ok) { setTimeout(ok, 400 * (attempt + 1)); }).then(function () { return get(src, attempt + 1); });
+    });
+  }
+  Promise.all(FILES.map(function (src) { return get(src, 0); })).then(function (texts) {
+    texts.forEach(function (text, i) {
+      var s = document.createElement("script");
+      s.textContent = text + "\n//# sourceURL=" + new URL(FILES[i], location.href).href;
+      document.body.appendChild(s);
+    });
+  }, function () { /* fail() already said which file */ });
+})();
+</script>
 </body>
 </html>
