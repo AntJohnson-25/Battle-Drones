@@ -40,6 +40,9 @@ DR.Track.COURSES.forEach(function (course) {
   check("downed targets", S.kills >= 8, S.kills + " kills");
   check("targets fired back and hit", (counts.efire || 0) > 10 && (counts.ouch || 0) > 0);
   check("targets never inside walls", insideWall === 0, insideWall + " frames");
+  check("solid obstacles on the course", T.obs.length > 100, T.obs.length + " (" + Array.from(new Set(T.obs.map(function (o) { return o.kind; }))).join(", ") + ")");
+  check("tricks used and fire dodged", (counts.trick || 0) > 0 && (counts.dodge || 0) > 0, "tricks " + (counts.trick || 0) + ", dodges " + (counts.dodge || 0));
+  console.log("  crashes " + (counts.crash || 0));
   if (counts.down) check("respawned after being shot down", (counts.respawn || 0) >= counts.down - 1);
 });
 

@@ -20,6 +20,13 @@ and hosted on my own https address.
   - Headless Edge shots in `Notes/shots/hunt/` (city FPV + chase, mountain, results). Page title is now
     "Hop Drone Hunt" (working title; folder/game id unchanged).
   - **Not hand-played yet.** Older notes below describe the race version.
+- 2026-11-11 (later): city detail pass (setback towers, 3 wall styles, shopfronts, billboards, roof kit);
+  **tricks** Q/E barrel roll (sidestep) + X flip (pop up), 1.3 s cooldown, dodge fire mid-trick;
+  **obstacles are solid** (lampposts, billboards, roof kit, water towers, masts, trees, rocks; T.obs + T.hit in
+  track.js) and crashes/hard landings cost HP by speed; **obstacle sensor** (O toggles, on by default) warns +
+  beeps. **Intro = hand launch**: pilots walk out from 8 m behind their pad carrying the drone, wind up, throw
+  it overhead (falconer style), it climbs to a 3.2 m hover; intro is now 7.5 s. Pilots stand behind their pads
+  (the stand is just decor). Tests pass; launch shots in Notes/shots/hunt/20-26.
 
 - 2026-10-09: project created from the Hop Tag SDK starter.
 - 2026-10-09: **first playable build.** 3D FPV drone race on one course ("Canyon Loop", ~1.2 km,

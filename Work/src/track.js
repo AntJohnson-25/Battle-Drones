@@ -98,14 +98,17 @@ globalThis.DR = globalThis.DR || {};
     T.ahead = function (a, b) { const d = b - a; return ((d % len) + len * 1.5) % len - len / 2; };
 
     T.startS = 40;
-    // Launch pads: two rows of four behind the start, facing down the line.
+    // Launch pads: one row of eight across the line behind the start. Each pilot
+    // walks out to theirs from behind (wx, wz) and launches from the hand.
     T.grid = [];
-    for (let k = 0; k < 8; k++) {
-      const row = Math.floor(k / 4), col = k % 4;
-      const p = T.at(T.startS - 14 - row * 7);
-      const hl = Math.hypot(p.tx, p.tz) || 1, sx = -p.tz / hl, sz = p.tx / hl;
-      const o = (col - 1.5) * 3.2 + (row % 2 ? 0.8 : -0.8);
-      T.grid.push({ x: p.x + sx * o, z: p.z + sz * o, yaw: U.yawTo(p.tx, p.tz) });
+    {
+      const p = T.at(T.startS - 14);
+      const hl = Math.hypot(p.tx, p.tz) || 1, sx = -p.tz / hl, sz = p.tx / hl, fx = p.tx / hl, fz = p.tz / hl;
+      for (let k = 0; k < 8; k++) {
+        const o = (k - 3.5) * 3.4;
+        const x = p.x + sx * o, z = p.z + sz * o;
+        T.grid.push({ x: x, z: z, yaw: U.yawTo(p.tx, p.tz), fx: fx, fz: fz, wx: x - fx * 8, wz: z - fz * 8 });
+      }
     }
     // The pilots' stand: beside the start, on the left, facing the line.
     {
@@ -115,10 +118,44 @@ globalThis.DR = globalThis.DR || {};
       T.stand = { x: x, z: z, yaw: U.yawTo(sx, sz) };
     }
 
+    T.obs = [];
     if (C.name === "city") buildCity(T); else buildMountain(T);
-    T.grid.forEach(function (g) { g.y = T.ground(g.x, g.z) + 0.25; });
+    T.grid.forEach(function (g) { g.y = T.ground(g.x, g.z) + 0.25; g.wy = T.ground(g.wx, g.wz); });
     T.stand.y = T.ground(T.stand.x, T.stand.z);
+    indexObstacles(T);
     return T;
+  }
+
+  // ------------------------------------------------------------------ obstacles
+  // Everything solid that isn't ground or a building wall: lampposts, billboards,
+  // rooftop kit, trees, rocks. Cylinders { c, x, z, r, y0, y1 } and boxes
+  // { b, x, z, hx, hz, y0, y1 }, bucketed on a 16 m grid for quick tests.
+  const OC = 16;
+  function indexObstacles(T) {
+    const grid = new Map();
+    T.obs.forEach(function (o) {
+      const ext = o.c ? o.r : Math.max(o.hx, o.hz);
+      for (let ix = Math.floor((o.x - ext) / OC); ix <= Math.floor((o.x + ext) / OC); ix++)
+        for (let iz = Math.floor((o.z - ext) / OC); iz <= Math.floor((o.z + ext) / OC); iz++) {
+          const k = ix * 65536 + iz;
+          if (!grid.has(k)) grid.set(k, []);
+          grid.get(k).push(o);
+        }
+    });
+    // The obstacle a sphere at (x, y, z) of radius rad touches, or null.
+    T.hit = function (x, y, z, rad) {
+      const list = grid.get(Math.floor(x / OC) * 65536 + Math.floor(z / OC));
+      if (!list) return null;
+      for (let i = 0; i < list.length; i++) {
+        const o = list[i];
+        if (y < o.y0 - rad || y > o.y1 + rad) continue;
+        if (o.c) { if (Math.hypot(x - o.x, z - o.z) < o.r + rad) return o; }
+        else if (Math.abs(x - o.x) < o.hx + rad && Math.abs(z - o.z) < o.hz + rad) return o;
+      }
+      return null;
+    };
+    // Is the point inside anything solid (ground, a wall, an obstacle)?
+    T.solid = function (x, y, z, rad) { return y - rad < T.terrain(x, z) || !!T.hit(x, y, z, rad); };
   }
 
   // ------------------------------------------------------------------ city
@@ -164,6 +201,42 @@ globalThis.DR = globalThis.DR || {};
       }
     }
     T.buildings = B;
+    // Billboard placement, rooftop kit and streetlights: the view draws exactly
+    // these, and they're solid.
+    B.forEach(function (b) {
+      const top = b.tiers[b.tiers.length - 1], t0 = b.tiers[0];
+      b.props = [];
+      if (b.roof === 0 && b.style === 2) b.props.push({ k: "water", x: b.x + top.w * 0.2, y: top.top, z: b.z - top.d * 0.15 });
+      if (b.roof === 1 || b.roof === 2) {
+        b.props.push({ k: "box", x: b.x - top.w * 0.18, y: top.top + 1.2, z: b.z + top.d * 0.12, w: top.w * 0.3, h: 2.4, d: top.d * 0.25 });
+        b.props.push({ k: "box", x: b.x + top.w * 0.2, y: top.top + 0.9, z: b.z - top.d * 0.2, w: 2.2, h: 1.8, d: 2.2 });
+      }
+      if (b.h > 60 && b.roof === 3) b.props.push({ k: "mast", x: b.x, y: top.top, z: b.z });
+      b.props.forEach(function (p) {
+        if (p.k === "water") T.obs.push({ c: 1, x: p.x, z: p.z, r: 2.5, y0: p.y, y1: p.y + 8.2, kind: "water tower" });
+        else if (p.k === "box") T.obs.push({ b: 1, x: p.x, z: p.z, hx: p.w / 2, hz: p.d / 2, y0: p.y - p.h / 2, y1: p.y + p.h / 2, kind: "rooftop unit" });
+        else T.obs.push({ c: 1, x: p.x, z: p.z, r: 0.5, y0: p.y, y1: p.y + 12.6, kind: "mast" });
+      });
+      const BB = b.board;
+      if (BB) {
+        BB.half = (BB.nx !== 0 ? t0.w : t0.d) / 2;
+        BB.span = Math.min(12, (BB.nx !== 0 ? t0.d : t0.w) - 3);
+        if (BB.span < 6) { b.board = null; return; }
+        BB.H = BB.span / 4;
+        BB.fx = b.x + BB.nx * (BB.half + 0.8); BB.fz = b.z + BB.nz * (BB.half + 0.8);
+        T.obs.push({ b: 1, x: b.x + BB.nx * (BB.half + 0.5), z: b.z + BB.nz * (BB.half + 0.5),
+          hx: BB.nx ? 0.55 : BB.span / 2 + 0.3, hz: BB.nx ? BB.span / 2 + 0.3 : 0.55, y0: BB.y - BB.H / 2 - 0.3, y1: BB.y + BB.H / 2 + 0.3, kind: "billboard" });
+      }
+    });
+    T.lamps = [];
+    for (let i = 0; i < Math.floor(T.len / 30); i++) {
+      const a = T.at(i * 30 + 10), hl = Math.hypot(a.tx, a.tz) || 1;
+      [-1, 1].forEach(function (sd) {
+        const x = a.x - a.tz / hl * 13 * sd, z = a.z + a.tx / hl * 13 * sd;
+        T.lamps.push({ x: x, z: z, yaw: U.yawTo(a.tx, a.tz) + (sd > 0 ? Math.PI / 2 : -Math.PI / 2) });
+        T.obs.push({ c: 1, x: x, z: z, r: 0.35, y0: 0, y1: 7.4, kind: "lamppost" });
+      });
+    }
     T.ground = function () { return 0; };
     T.terrain = function (x, z) {
       const ix = Math.floor((x - CX0) / BLOCK), iz = Math.floor((z - CZ0) / BLOCK);
@@ -216,6 +289,25 @@ globalThis.DR = globalThis.DR || {};
     };
     T.ground = T.terrain;
     T.extent = { x0: T0X, z0: T0Z, size: TSIZE };
+    // Pines on the lower slopes, rocks higher up: drawn by the view, solid here.
+    const rng = U.rng(77);
+    T.trees = []; T.rocks = [];
+    let th = -1;
+    for (let i = 0; i < 5000 && T.trees.length < 760; i++) {
+      const x = T0X + 20 + rng() * (TSIZE - 40), z = T0Z + 20 + rng() * (TSIZE - 40);
+      const r1 = rng(), r2 = rng(), r3 = rng();
+      const nb = T.nearest(x, z, th); th = nb.i;
+      if (nb.d > 260) continue;
+      if (Math.hypot(x - T.stand.x, z - T.stand.z) < 18) continue;
+      const h = T.terrain(x, z);
+      // A few pines near the line so the valley isn't a free corridor.
+      if (nb.d < 26 && !(nb.d > 17 && r3 < 0.25 && h < 40)) continue;
+      if (h > 92) { if (r1 < 0.15) T.rocks.push([x, h, z, 1.5 + r2 * 3, r3 * 6]); continue; }
+      if (r1 < 0.1) T.rocks.push([x, h, z, 0.8 + r2 * 2.2, r3 * 6]);
+      else T.trees.push([x, h, z, 0.9 + r2 * 0.9, r3]);
+    }
+    T.trees.forEach(function (t) { T.obs.push({ c: 1, x: t[0], z: t[2], r: 1.5 * t[3], y0: t[1] - 1, y1: t[1] + 11 * t[3] * (0.9 + t[4] * 0.4), kind: "tree" }); });
+    T.rocks.forEach(function (r) { T.obs.push({ c: 1, x: r[0], z: r[2], r: 1.2 * r[3], y0: r[1] - 1, y1: r[1] + 1.3 * r[3], kind: "rock" }); });
   }
 
   DR.Track = { build: build, COURSES: Object.keys(COURSES) };

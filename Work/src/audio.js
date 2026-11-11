@@ -108,6 +108,12 @@ globalThis.DR = globalThis.DR || {};
       case "respawn": [440, 660, 880].forEach(function (f, i) { tone(f, 0.12, "triangle", 0.1, 0, i * 0.07); }); break;
       case "over": [784, 659, 523, 784, 1047].forEach(function (f, i) { tone(f, 0.2, "square", 0.09, 0, i * 0.12); }); break;
       case "tick": tone(1000, 0.06, "square", 0.06); break;
+      case "crash": noise(0.45, 0.45, 700, 80); tone(130, 0.35, "square", 0.16, 50); break;
+      case "roll": noise(0.35, 0.18, 600, 2400); break;
+      case "flip": noise(0.45, 0.2, 400, 2600); tone(300, 0.4, "triangle", 0.06, 900); break;
+      case "dodge": tone(1400, 0.08, "sine", 0.08); tone(1900, 0.1, "sine", 0.07, 0, 0.06); break;
+      case "prox": tone(1250, 0.045, "square", 0.04); break;
+      case "prox2": tone(1650, 0.045, "square", 0.06); break;
     }
   };
 

@@ -52,10 +52,19 @@ canvas#view { display: block; width: 100vw; height: 100vh; }
 .tmark.edge span { top: 14px; }
 
 #osd { position: absolute; inset: 0; font: 700 14px/1.2 ui-monospace, Consolas, monospace; color: rgba(255, 255, 255, 0.85); text-shadow: 0 0 3px #000; }
-#osd .osd-l, #osd .osd-r { position: absolute; bottom: 104px; display: grid; gap: 2px; }
+#osd .osd-l, #osd .osd-r { position: absolute; bottom: 140px; display: grid; gap: 2px; }
 #osd .osd-l { left: 18px; }
 #osd .osd-r { right: 200px; text-align: right; }
 #incoming { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); font: 900 15px var(--font); letter-spacing: 3px; color: var(--hot); opacity: 0; text-shadow: 0 0 6px rgba(0, 0, 0, 0.8); }
+#prox { position: absolute; left: 50%; top: 66%; transform: translateX(-50%); font: 900 16px var(--font); letter-spacing: 1px; padding: 4px 14px; border-radius: 999px;
+  background: rgba(255, 194, 58, 0.9); color: #1d2230; opacity: 0; transition: opacity 0.1s; }
+#prox.on { opacity: 1; }
+#prox.close { background: rgba(255, 45, 74, 0.95); color: #fff; animation: blink 0.2s infinite; }
+#tricks { position: absolute; left: 18px; bottom: 100px; display: grid; gap: 3px; font: 800 12px var(--font); letter-spacing: 1px; text-shadow: 0 1px 2px #000; }
+#tricks div { width: 140px; height: 5px; border-radius: 999px; background: rgba(20, 24, 34, 0.6); overflow: hidden; }
+#tricks i { display: block; height: 100%; background: var(--sky); }
+#trick.ok { color: var(--sky); }
+#trick.go { color: var(--lime); }
 #incoming.on { opacity: 1; animation: blink 0.3s infinite; }
 @keyframes blink { 50% { opacity: 0.35; } }
 

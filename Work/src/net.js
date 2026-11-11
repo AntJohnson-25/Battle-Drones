@@ -109,7 +109,7 @@ globalThis.DR = globalThis.DR || {};
       if (S.over) N.finalSent++;
       HopLobby.send({
         t: "p", id: N.match.id, x: U.r2(me.x), y: U.r2(me.y), z: U.r2(me.z), yw: U.r3(me.yaw),
-        pt: U.r3(me.pitch), rl: U.r3(U.wrap(me.roll)), sp: U.r1(me.speed), sc: me.score, lk: U.r2(me.lastKillT),
+        pt: U.r3(U.wrap(me.pitch)), rl: U.r3(U.wrap(me.roll)), sp: U.r1(me.speed), sc: me.score, lk: U.r2(me.lastKillT),
         dn: me.downT > 0 ? 1 : 0, f: S.over ? 1 : 0
       });
     }
