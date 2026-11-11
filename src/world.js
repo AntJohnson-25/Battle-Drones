@@ -114,14 +114,12 @@ globalThis.DR = globalThis.DR || {};
       box(trim, b.x, 2.3, b.z, t0.w + 0.3, 4.6, t0.d + 0.3, 0x2b3446);
       box(glow, b.x, 2.1, b.z, t0.w + 0.36, 2.2, t0.d + 0.36, b.tint > 0.5 ? 0xffe2a6 : 0xbfe8ff);
       box(trim, b.x, 4.8, b.z, t0.w + 2.2, 0.25, t0.d + 2.2, [0xd94f3d, 0x2f8f6b, 0x3a64c4, 0xe0a030][b.roof]);
-      // Roof clutter.
-      const top = b.tiers[b.tiers.length - 1];
-      if (b.roof === 0 && b.style === 2) waterTower(trim, b.x + top.w * 0.2, top.top, b.z - top.d * 0.15);
-      if (b.roof === 1 || b.roof === 2) {
-        box(trim, b.x - top.w * 0.18, top.top + 1.2, b.z + top.d * 0.12, top.w * 0.3, 2.4, top.d * 0.25, 0x8a8f9c);
-        box(trim, b.x + top.w * 0.2, top.top + 0.9, b.z - top.d * 0.2, 2.2, 1.8, 2.2, 0x9aa0ad);
-      }
-      if (b.h > 60 && b.roof === 3) mast(group, b.x, top.top, b.z);
+      // Roof clutter (placed by track.js, which also makes it solid).
+      b.props.forEach(function (p) {
+        if (p.k === "water") waterTower(trim, p.x, p.y, p.z);
+        else if (p.k === "box") box(trim, p.x, p.y, p.z, p.w, p.h, p.d, p.w > 2.3 ? 0x8a8f9c : 0x9aa0ad);
+        else mast(group, p.x, p.y, p.z);
+      });
       if (b.board) billboard(boards, trim, b);
     });
     const tex = wallTextures();
@@ -132,20 +130,13 @@ globalThis.DR = globalThis.DR || {};
     // Streetlights along the avenue.
     const lampGeo = new THREE.CylinderGeometry(0.12, 0.18, 7, 5); lampGeo.translate(0, 3.5, 0);
     const headGeo = new THREE.BoxGeometry(1.4, 0.3, 0.5); headGeo.translate(0.5, 7, 0);
-    const n = Math.floor(T.len / 30);
-    const lamps = new THREE.InstancedMesh(lampGeo, lambert(0x2f3442), n * 2);
-    const heads = new THREE.InstancedMesh(headGeo, new THREE.MeshBasicMaterial({ color: 0xfff1c4 }), n * 2);
+    const lamps = new THREE.InstancedMesh(lampGeo, lambert(0x2f3442), T.lamps.length);
+    const heads = new THREE.InstancedMesh(headGeo, new THREE.MeshBasicMaterial({ color: 0xfff1c4 }), T.lamps.length);
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), s = new THREE.Vector3(1, 1, 1), v = new THREE.Vector3();
-    let k = 0;
-    for (let i = 0; i < n; i++) {
-      const a = T.at(i * 30 + 10), hl = Math.hypot(a.tx, a.tz) || 1;
-      [-1, 1].forEach(function (sd) {
-        v.set(a.x - a.tz / hl * 13 * sd, 0, a.z + a.tx / hl * 13 * sd);
-        q.setFromEuler(e.set(0, U.yawTo(a.tx, a.tz) + (sd > 0 ? Math.PI / 2 : -Math.PI / 2), 0));
-        m4.compose(v, q, s);
-        lamps.setMatrixAt(k, m4); heads.setMatrixAt(k, m4); k++;
-      });
-    }
+    T.lamps.forEach(function (L, k) {
+      m4.compose(v.set(L.x, 0, L.z), q.setFromEuler(e.set(0, L.yaw, 0)), s);
+      lamps.setMatrixAt(k, m4); heads.setMatrixAt(k, m4);
+    });
     group.add(lamps, heads);
   }
   function mast(group, x, y, z) {
@@ -279,13 +270,9 @@ globalThis.DR = globalThis.DR || {};
 
   // A 12 x 3 m panel standing 0.8 m off the wall on struts, with a frame.
   function billboard(boards, trim, b) {
-    const B = b.board, t0 = b.tiers[0];
+    const B = b.board;
     const along = B.nx !== 0 ? "z" : "x";
-    const half = (B.nx !== 0 ? t0.w : t0.d) / 2;
-    const span = Math.min(12, (B.nx !== 0 ? t0.d : t0.w) - 3);
-    if (span < 6) return;
-    const H = span / 4;
-    const fx = b.x + B.nx * (half + 0.8), fz = b.z + B.nz * (half + 0.8);
+    const half = B.half, span = B.span, H = B.H, fx = B.fx, fz = B.fz;
     // Frame and struts.
     box(trim, fx - B.nx * 0.1, B.y, fz - B.nz * 0.1, along === "z" ? 0.3 : span + 0.6, H + 0.6, along === "z" ? span + 0.6 : 0.3, 0x2b2f3a);
     [-0.35, 0.35].forEach(function (s) {
@@ -371,18 +358,8 @@ globalThis.DR = globalThis.DR || {};
     const m = new THREE.Mesh(geo, lambert(0xffffff, { vertexColors: true }));
     m.matrixAutoUpdate = false;
     group.add(m);
-    // Pines on the lower slopes, rocks higher up.
-    const trees = [], rocks = [];
-    for (let i = 0; i < 4000 && trees.length < 700; i++) {
-      const x = G.x0 + 20 + rng() * (G.size - 40), z = G.z0 + 20 + rng() * (G.size - 40);
-      const nb = T.nearest(x, z);
-      if (nb.d < 26 || nb.d > 260) continue;
-      if (Math.hypot(x - T.stand.x, z - T.stand.z) < 18) continue;
-      const h = T.terrain(x, z);
-      if (h > 92) { if (rng() < 0.15) rocks.push([x, h, z, 1.5 + rng() * 3, rng() * 6]); continue; }
-      if (rng() < 0.1) rocks.push([x, h, z, 0.8 + rng() * 2.2, rng() * 6]);
-      else trees.push([x, h, z, 0.9 + rng() * 0.9, rng()]);
-    }
+    // Pines and rocks (placed by track.js, which also makes them solid).
+    const trees = T.trees, rocks = T.rocks;
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), s = new THREE.Vector3(), p = new THREE.Vector3();
     const trunkGeo = new THREE.CylinderGeometry(0.35, 0.5, 3, 5); trunkGeo.translate(0, 1.5, 0);
     const leafGeo = new THREE.ConeGeometry(2.4, 9, 6); leafGeo.translate(0, 7, 0);

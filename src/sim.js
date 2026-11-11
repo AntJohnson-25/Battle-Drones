@@ -16,10 +16,16 @@ globalThis.DR = globalThis.DR || {};
     // flight
     cruise: 30, brake: 16, turn: 1.75, brakeTurn: 1.45, climb: 14, accel: 22, decel: 34, clearance: 1.2,
     camTilt: 0.28,                      // the FPV camera and the guns point this far above the nose
-    // round
-    intro: 6.5, count: 3, round: 180, liftoff: 1.2, maxPilots: 8,
+    // round: the intro is the walk-out and hand launch (view.js times its shots to these)
+    intro: 7.5, count: 3, round: 180, liftoff: 1.2, maxPilots: 8, hover: 3.2,
     // you
-    hp: 100, downT: 3, invulnT: 2.5, bonkDmg: 6,
+    hp: 100, downT: 3, invulnT: 2.5,
+    // crashes: a hit costs crashBase + crashPerMs x speed; a hard landing costs per m/s of descent
+    crashBase: 8, crashPerMs: 0.55, landHard: 6, landPerMs: 1.4, droneR: 0.7,
+    // tricks: barrel roll (Q / E) sidesteps, flip (X) pops up; both dodge fire while they last
+    rollT: 0.5, rollSide: 20, flipT: 0.65, flipUp: 19, trickCd: 1.3,
+    // obstacle sensor: looks this far ahead
+    sensor: 16,
     fireEvery: 1 / 7, shotSpeed: 170, shotLife: 1.05, assist: 0.11, assistRange: 175,
     // them
     pool: 60, alive: 5, spawnAhead: 85, tHp: 3, aceHp: 7, tR: 2.1, aceR: 2.7,
@@ -53,17 +59,19 @@ globalThis.DR = globalThis.DR || {};
       T: T, t: opts.t0 || 0, seed: seed, humanId: -1, racers: [],
       pack: pack(seed), next: 0, targets: [], shots: [], bolts: [], nextId: 1,
       events: [], over: false, results: null, kills: 0, escaped: 0,
-      input: { steer: 0, climb: 0, brake: false, fire: false },
+      input: { steer: 0, climb: 0, brake: false, fire: false, trick: null },
       rand: U.rng((seed * 7919 + 17) >>> 0)
     };
     roster.slice(0, CFG.maxPilots).forEach(function (r, i) {
       const g = T.grid[i % T.grid.length];
+      const hy = g.y + CFG.hover;   // released from the hand, it hovers here until GO
       S.racers.push({
         id: i, name: r.name, hl: r.hl || null, bot: false, left: false, colour: COLOURS[i % COLOURS.length],
-        x: g.x, y: g.y, z: g.z, yaw: g.yaw, pitch: 0, roll: 0, speed: 0, vy: 0, steerS: 0,
+        x: g.x, y: hy, z: g.z, yaw: g.yaw, pitch: 0, roll: 0, speed: 0, vy: 0, steerS: 0,
         near: -1, s: T.startS - 14, hp: CFG.hp, downT: 0, invulnT: 0, bonkT: 0, hurtT: 0, wrongT: 0,
+        trick: null, trickT: 0, trickCd: 0, sideV: 0, spinR: 0, spinP: 0, warn: Infinity, warnKind: "", lastCrash: "",
         fireCd: 0, score: opts.score && i === opts.me ? opts.score : 0, lastKillT: 0, shotsFired: 0, shotsHit: 0, deaths: 0,
-        disp: { x: g.x, y: g.y, z: g.z, yaw: g.yaw, pitch: 0, roll: 0, speed: 0 }
+        disp: { x: g.x, y: hy, z: g.z, yaw: g.yaw, pitch: 0, roll: 0, speed: 0 }
       });
     });
     S.phase = function () {
@@ -105,22 +113,55 @@ globalThis.DR = globalThis.DR || {};
     r.speed = U.approach(r.speed, target, (target > r.speed ? CFG.accel : CFG.decel) * dt);
     r.steerS = U.approach(r.steerS, U.clamp(inp.steer, -1, 1), 6 * dt);
     r.yaw = U.wrap(r.yaw + CFG.turn * r.steerS * (inp.brake ? CFG.brakeTurn : 1) * dt);
+    // Tricks: a barrel roll throws you sideways, a flip pops you up; both spin the drone.
+    r.trickCd = Math.max(0, r.trickCd - dt);
+    if (inp.trick && !r.trick && r.trickCd <= 0) startTrick(S, r, inp.trick);
+    inp.trick = null;
+    if (r.trick) {
+      r.trickT += dt;
+      const flip = r.trick === "flip", u = Math.min(1, r.trickT / (flip ? CFG.flipT : CFG.rollT));
+      if (flip) r.spinP = Math.PI * 2 * U.ease(u);
+      else r.spinR = (r.trick === "rollL" ? 1 : -1) * Math.PI * 2 * U.ease(u);
+      if (u >= 1) { r.trick = null; r.spinR = 0; r.spinP = 0; }
+    }
+    r.sideV = U.approach(r.sideV, 0, 45 * dt);
     let climb = U.clamp(inp.climb, -1, 1);
     const ground0 = T.terrain(r.x, r.z);
-    if (ht < CFG.liftoff + 0.4 && r.y < ground0 + 5) climb = Math.max(climb, 0.8);
-    r.vy = U.approach(r.vy, climb * CFG.climb, 30 * dt);
-    let nx = r.x + U.fwdX(r.yaw) * r.speed * dt, nz = r.z + U.fwdZ(r.yaw) * r.speed * dt, ny = r.y + r.vy * dt;
+    r.vy = U.approach(r.vy, climb * CFG.climb, (r.trick === "flip" ? 24 : 30) * dt);
+    const rx = -U.fwdZ(r.yaw), rz = U.fwdX(r.yaw);   // to the drone's right
+    let nx = r.x + U.fwdX(r.yaw) * r.speed * dt + rx * r.sideV * dt;
+    let nz = r.z + U.fwdZ(r.yaw) * r.speed * dt + rz * r.sideV * dt;
+    let ny = r.y + r.vy * dt;
     const ground = T.terrain(nx, nz);
     if (ground + CFG.clearance > ny) {
       if (ground - ground0 > 1.8 && ground + CFG.clearance - ny > 1.5) {
-        // Flew into a wall or a hillside: bounce off it (and it stings).
-        nx = r.x; nz = r.z; r.speed *= 0.35;
-        if (r.bonkT <= 0) { r.bonkT = 0.5; damage(S, r, CFG.bonkDmg, -1); S.events.push({ k: "bonk", p: r.id }); }
-      }
+        // Flew into a wall or a hillside: bounce off it, and it hurts more the faster you were going.
+        crash(S, r, T.course === "city" ? "building" : "hillside", r.speed + Math.abs(r.sideV), false);
+        nx = r.x; nz = r.z; r.speed *= 0.35; r.sideV = 0;
+      } else if (r.vy < -CFG.landHard && ht > 0.5) crash(S, r, "ground", -r.vy, true);
       ny = Math.max(ny, T.terrain(nx, nz) + CFG.clearance);
       if (r.vy < 0) r.vy = 0;
     }
+    // Lampposts, billboards, rooftop kit, trees, rocks.
+    const ob = T.hit(nx, ny, nz, CFG.droneR);
+    if (ob) {
+      crash(S, r, ob.kind, r.speed + Math.abs(r.sideV) + Math.abs(r.vy) * 0.5, false);
+      const dx = r.x - ob.x, dz = r.z - ob.z, l = Math.hypot(dx, dz) || 1;
+      nx = r.x + dx / l * 0.5; nz = r.z + dz / l * 0.5; ny = r.y;
+      r.speed *= 0.3; r.sideV = 0; r.vy = Math.min(r.vy, 0);
+    }
     if (ny > T.ceiling) { ny = T.ceiling; if (r.vy > 0) r.vy = 0; }
+    // Obstacle sensor: probe ahead along the flight path; the HUD warns and beeps.
+    r.warn = Infinity; r.warnKind = "";
+    const sp = Math.max(r.speed, 6);
+    for (let d = 3; d <= CFG.sensor; d += 3.25) {
+      const px = nx + U.fwdX(r.yaw) * d + rx * r.sideV * d / sp, pz = nz + U.fwdZ(r.yaw) * d + rz * r.sideV * d / sp;
+      const py = ny + r.vy * d / sp;
+      const o = T.hit(px, py, pz, 1.0);
+      if (o) { r.warn = d; r.warnKind = o.kind; break; }
+      const tg = T.terrain(px, pz);
+      if (tg > py - 0.6) { r.warn = d; r.warnKind = tg - T.ground(px, pz) > 2 ? "building" : T.course === "city" ? "ground" : "hillside"; break; }
+    }
     const nb = T.nearest(nx, nz, r.near);
     r.near = nb.i; r.s = nb.s;
     if (nb.d > T.boundary) {
@@ -128,8 +169,8 @@ globalThis.DR = globalThis.DR || {};
       nx = lx + (nx - lx) * k; nz = lz + (nz - lz) * k;
     }
     r.x = nx; r.y = ny; r.z = nz;
-    r.roll = r.steerS * 0.6;
-    r.pitch = -0.28 * (r.speed / CFG.cruise) + (r.vy / CFG.climb) * 0.3;
+    r.roll = r.steerS * 0.6 + r.spinR;
+    r.pitch = -0.28 * (r.speed / CFG.cruise) + U.clamp(r.vy / CFG.climb, -1, 1) * 0.3 + r.spinP;
     if (r.bonkT > 0) r.bonkT -= dt;
     // Wrong way: flying against the line for a while.
     const dot = U.fwdX(r.yaw) * T.tan[r.near * 3] + U.fwdZ(r.yaw) * T.tan[r.near * 3 + 2];
@@ -147,6 +188,23 @@ globalThis.DR = globalThis.DR || {};
     r.yaw = U.yawTo(p.tx, p.tz); r.pitch = 0; r.roll = 0; r.vy = 0; r.speed = 14; r.steerS = 0;
     r.near = nb.i; r.s = nb.s; r.hp = CFG.hp; r.downT = 0; r.invulnT = shield ? CFG.invulnT : 0; r.late = true;
     setDisp(r);
+  }
+
+  function startTrick(S, r, k) {
+    if (S.phase() !== "hunt" || r.downT > 0 || ["rollL", "rollR", "flip"].indexOf(k) < 0) return;
+    r.trick = k; r.trickT = 0; r.trickCd = CFG.trickCd;
+    if (k === "flip") r.vy = CFG.flipUp; else r.sideV = (k === "rollL" ? -1 : 1) * CFG.rollSide;
+    S.events.push({ k: "trick", p: r.id, t: k });
+  }
+
+  // Hit something: damage by impact speed (or, for a landing, by how fast you came down).
+  function crash(S, r, kind, impact, landing) {
+    if (r.bonkT > 0 || S.phase() !== "hunt") return;
+    r.bonkT = 0.6;
+    const dmg = Math.round(landing ? 4 + (impact - CFG.landHard) * CFG.landPerMs : CFG.crashBase + CFG.crashPerMs * impact);
+    r.lastCrash = kind;
+    S.events.push({ k: "crash", p: r.id, kind: kind, dmg: dmg });
+    damage(S, r, dmg, -1);
   }
 
   function damage(S, r, n, by) {
@@ -283,7 +341,7 @@ globalThis.DR = globalThis.DR || {};
       sh.px = sh.x; sh.py = sh.y; sh.pz = sh.z;
       sh.x += sh.vx * dt; sh.y += sh.vy * dt; sh.z += sh.vz * dt;
       if (sh.life <= 0) return false;
-      if (sh.y < T.terrain(sh.x, sh.z)) { S.events.push({ k: "spark", x: sh.x, y: sh.y, z: sh.z }); return false; }
+      if (sh.y < T.terrain(sh.x, sh.z) || T.hit(sh.x, sh.y, sh.z, 0.1)) { S.events.push({ k: "spark", x: sh.x, y: sh.y, z: sh.z }); return false; }
       for (let i = 0; i < S.targets.length; i++) {
         const tg = S.targets[i], R = tg.spec.ace ? CFG.aceR : CFG.tR;
         if (segDist2(sh.px, sh.py, sh.pz, sh.x, sh.y, sh.z, tg.x, tg.y, tg.z) > R * R) continue;
@@ -302,8 +360,10 @@ globalThis.DR = globalThis.DR || {};
       b.life -= dt;
       b.px = b.x; b.py = b.y; b.pz = b.z;
       b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
-      if (b.life <= 0 || b.y < T.terrain(b.x, b.z)) return false;
+      if (b.life <= 0 || b.y < T.terrain(b.x, b.z) || T.hit(b.x, b.y, b.z, 0.1)) return false;
       if (me.downT <= 0 && segDist2(b.px, b.py, b.pz, b.x, b.y, b.z, me.x, me.y, me.z) < CFG.boltR * CFG.boltR) {
+        // Mid-trick, fire slips past you.
+        if (me.trick) { if (!b.dodged) { b.dodged = true; S.events.push({ k: "dodge", p: me.id }); } return true; }
         if (me.invulnT > 0) return false;
         S.events.push({ k: "ouch", p: me.id, dmg: b.dmg });
         damage(S, me, b.dmg, 0);
@@ -337,11 +397,21 @@ globalThis.DR = globalThis.DR || {};
       const dx = tg.x - r.x, dy = tg.y - r.y, dz = tg.z - r.z, d = Math.hypot(dx, dy, dz);
       fire = d < 160 && (dx * a.x + dy * a.y + dz * a.z) / d > Math.cos(0.1);
     }
+    // Evade: a roll away from fire about to land, a flip over something close ahead.
+    let trick = null;
+    if (!r.trick && r.trickCd <= 0) {
+      S.bolts.forEach(function (b) {
+        const dx = r.x - b.x, dy = r.y - b.y, dz = r.z - b.z, d = Math.hypot(dx, dy, dz);
+        if (!trick && d < 22 && (dx * b.vx + dy * b.vy + dz * b.vz) / (d * CFG.boltSpeed) > 0.95) trick = (b.x - r.x) * -U.fwdZ(r.yaw) + (b.z - r.z) * U.fwdX(r.yaw) > 0 ? "rollL" : "rollR";   // fire from the right: roll left
+      });
+      if (!trick && r.warn < 7 && r.warnKind !== "ground") trick = "flip";
+    }
     return {
       steer: U.clamp(diff * 2.4, -1, 1),
-      climb: U.clamp((ay - r.y) * 0.35 - r.vy * 0.06, -1, 1),
-      brake: Math.abs(diff) > 0.9 || (tg && bd < 14),
-      fire: fire
+      climb: U.clamp((ay - r.y) * 0.35 - r.vy * 0.06 + (r.warn < 12 ? 0.6 : 0), -1, 1),
+      brake: Math.abs(diff) > 0.9 || (tg && bd < 14) || r.warn < 8,
+      fire: fire,
+      trick: trick
     };
   }
 

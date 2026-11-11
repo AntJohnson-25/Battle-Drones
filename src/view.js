@@ -37,6 +37,7 @@ globalThis.DR = globalThis.DR || {};
     DR.World.show(S.T);
     V.drones.forEach(function (d) { V.scene.remove(d.root); V.scene.remove(d.blob); });
     V.pilots.forEach(function (p) { if (p && p.root.parent) p.root.parent.remove(p.root); });
+    V.T = S.T;
     V.drones = S.racers.map(function (r) {
       const d = DR.Drone.make(r, r.id === S.humanId);
       d.blob = new THREE.Mesh(V.blobGeo, V.blobMat.clone());
@@ -44,11 +45,8 @@ globalThis.DR = globalThis.DR || {};
       V.scene.add(d.root); V.scene.add(d.blob);
       return d;
     });
-    V.pilots = S.racers.map(function (r, i) {
-      const p = DR.Pilot.make(r, DR.World.stand.slots[i % 8]);
-      DR.World.stand.root.add(p.root);
-      return p;
-    });
+    // Pilots stand behind their own launch pad (they walk out to it in the intro).
+    V.pilots = S.racers.map(function (r, i) { return V.makePilot(r, i); });
     Object.keys(V.targets).forEach(function (id) { V.fx.remove(V.targets[id].root); });
     V.targets = {};
     V.booms.forEach(function (b) { b.visible = false; b.userData.t = 9; });
@@ -56,6 +54,68 @@ globalThis.DR = globalThis.DR || {};
     V.camSnap = true;
     V.overT = 0;
   };
+
+  V.makePilot = function (r, i) {
+    const g = V.T.grid[i % V.T.grid.length];
+    const p = DR.Pilot.make(r, { x: 0, y: 0, z: 0 });
+    p.root.rotation.y = g.yaw;
+    p.g = g;
+    placePilot(p, 1);
+    V.scene.add(p.root);
+    return p;
+  };
+  V.replacePilot = function (i, r) {
+    const old = V.pilots[i];
+    if (old) V.scene.remove(old.root);
+    V.pilots[i] = V.makePilot(r, i);
+  };
+
+  // ------------------------------------------------------------------ the hand launch
+  // Times within the intro (seconds). Every pilot walks out together.
+  const L = { walk: 2.7, windup: 3.0, throw: 3.55, release: 3.85, settle: 4.9, remote: 5.1 };
+  V.LAUNCH = L;
+  // Walk from behind the pad (u = 0) to just behind it (u = 1).
+  function placePilot(p, u) {
+    const g = p.g, e = U.ease(u);
+    const x = U.lerp(g.wx, g.x - g.fx * 2.3, e), z = U.lerp(g.wz, g.z - g.fz * 2.3, e);
+    p.root.position.set(x, V.T.ground(x, z), z);
+  }
+  // The pose for pilot p at intro time t (null once they're on the sticks).
+  function launchPose(t, late) {
+    if (late || t >= L.remote) return { remote: true };
+    if (t < L.walk) return { walk: true, a: "carry", b: "carry", k: 1 };
+    if (t < L.windup) return { a: "carry", b: "carry", k: 1 };
+    if (t < L.throw) return { a: "carry", b: "windup", k: (t - L.windup) / (L.throw - L.windup) };
+    if (t < L.release + 0.15) return { a: "windup", b: "throw", k: Math.min(1, (t - L.throw) / (L.release - L.throw)) };
+    return { a: "throw", b: "carry", k: (t - L.release - 0.15) / (L.remote - L.release - 0.15), look: true };
+  }
+  // Where the drone is drawn during the launch: in the hand, then flung up to its hover.
+  const _rel = {};
+  function launchDrone(d, p, t, i) {
+    const r = d.r, D = r.disp;
+    if (t < L.release) {
+      const h = p.hand();
+      d.root.position.set(h.x, h.y + 0.1, h.z);
+      d.root.rotation.set(0, D.yaw, 0);
+      d.tilt.rotation.set(t > L.windup ? -0.5 * Math.min(1, (t - L.windup) * 3) : 0, 0, 0);
+      d.root.scale.setScalar(0.42);   // life size in the hand (drones fly drawn 2.2x so you can spot them)
+      _rel[i] = h;
+      d.launched = false;
+      return true;
+    }
+    if (t < L.settle) {
+      const a = _rel[i] || new THREE.Vector3(D.x, D.y - 2, D.z), u = (t - L.release) / (L.settle - L.release);
+      const e = 1 - Math.pow(1 - u, 3);
+      d.root.position.set(U.lerp(a.x, D.x, e), U.lerp(a.y, D.y, e) + Math.sin(u * Math.PI) * 1.6, U.lerp(a.z, D.z, e));
+      d.tilt.rotation.set(-0.5 * (1 - u) + Math.sin(u * 9) * 0.15 * (1 - u), 0, Math.sin(u * 7) * 0.25 * (1 - u));
+      d.root.scale.setScalar(U.lerp(0.42, 1, U.ease(u)));
+      d.launched = true;
+      return true;
+    }
+    d.launched = true;
+    d.root.scale.setScalar(1);
+    return false;
+  }
 
   // ------------------------------------------------------------------ effect pools
   function softTex(inner, outer) {
@@ -198,7 +258,7 @@ globalThis.DR = globalThis.DR || {};
     const fwd = new THREE.Vector3(0, 0, -1).transformDirection(root.matrixWorld);
     const right = new THREE.Vector3(1, 0, 0).transformDirection(root.matrixWorld);
     const remote = p.remote.root.getWorldPosition(new THREE.Vector3());
-    const pos = head.clone().addScaledVector(fwd, -0.7).addScaledVector(right, 0.75).add(new THREE.Vector3(0, 0.45, 0));
+    const pos = head.clone().addScaledVector(fwd, -1.7).addScaledVector(right, 0.95).add(new THREE.Vector3(0, 0.35, 0));
     const dronePos = new THREE.Vector3(drone.disp.x, drone.disp.y + 0.4, drone.disp.z);
     return { pos: pos, at: remote.clone().lerp(dronePos, U.ease((t - 0.4) / 1.6)) };
   }
@@ -207,7 +267,8 @@ globalThis.DR = globalThis.DR || {};
     const D = r.disp, cam = V.camera;
     V.shake = Math.max(0, V.shake - dt * 3);
     const sh = V.shake * 0.04;
-    cam.rotation.set(D.pitch + CFG.camTilt + (Math.random() - 0.5) * sh, D.yaw + (Math.random() - 0.5) * sh, D.roll * 0.85, "YXZ");
+    const spin = r.spinR || 0;   // a barrel roll turns the whole view a full 360
+    cam.rotation.set(D.pitch + CFG.camTilt + (Math.random() - 0.5) * sh, D.yaw + (Math.random() - 0.5) * sh, (D.roll - spin) * 0.85 + spin, "YXZ");
     _v.set(0, 0.32, -0.55).applyEuler(cam.rotation);
     cam.position.set(D.x + _v.x, D.y + _v.y, D.z + _v.z);
   }
@@ -249,9 +310,22 @@ globalThis.DR = globalThis.DR || {};
       return "watch";
     }
     if (ph === "intro" && pilot) {
-      const t = S.t;
-      if (t < 3.0) { const s = pilotShot(pilot, t, false); lookFrom(s.pos, s.at, t < 0.05 ? 1 : Math.min(1, dt * 3)); return "pilot"; }
-      if (t < CFG.intro - 0.55) { const s = overShoulder(pilot, me, t - 3.0); lookFrom(s.pos, s.at, Math.min(1, dt * (t < 3.05 ? 60 : 4))); return "shoulder"; }
+      const t = S.t, g = pilot.g, P = pilot.root.position;
+      const R = _w.set(-g.fz, 0, g.fx).clone();
+      if (t < L.walk) {
+        // Walking out with the drone in hand: the camera backs away in front of them.
+        const pos = new THREE.Vector3(P.x + g.fx * 3.4 + R.x * 1.4, P.y + 1.3, P.z + g.fz * 3.4 + R.z * 1.4);
+        lookFrom(pos, new THREE.Vector3(P.x, P.y + 1.2, P.z), t < 0.05 ? 1 : Math.min(1, dt * 5));
+        return "walk";
+      }
+      if (t < L.settle + 0.3) {
+        // Side on, low: the wind-up, the throw, the drone climbing away.
+        const dp = V.drones[me.id].root.position, hd = pilot.head();
+        const pos = new THREE.Vector3(P.x + R.x * 4.2 + g.fx * 0.8, P.y + 0.8, P.z + R.z * 4.2 + g.fz * 0.8);
+        lookFrom(pos, hd.lerp(dp, 0.55), V.lastShot !== "toss" ? 1 : Math.min(1, dt * 6));
+        return "toss";
+      }
+      if (t < CFG.intro - 0.55) { const s = overShoulder(pilot, me, t - L.settle + 1.2); lookFrom(s.pos, s.at, Math.min(1, dt * (V.lastShot !== "shoulder" ? 60 : 4))); return "shoulder"; }
       fpv(me, dt); return "goggles";
     }
     if (me.downT > 0) { chase(me, dt, 11, 5); return "down"; }
@@ -263,13 +337,30 @@ globalThis.DR = globalThis.DR || {};
   // ------------------------------------------------------------------ per frame
   V.frame = function (dt, now) {
     const S = V.S;
+    // Pilots first (the drone sits in their hand during the launch).
+    if (S) {
+      const intro = S.phase() === "intro";
+      const camPos = V.camera.position;
+      V.pilots.forEach(function (p, i) {
+        if (!p) return;
+        const r = S.racers[i];
+        placePilot(p, intro ? Math.min(1, S.t / L.walk) : 1);
+        p.root.visible = !r.left && camPos.distanceTo(p.root.position) < 120;
+        if (!p.root.visible) return;
+        const top = S.over && S.results && S.results.findIndex(function (x) { return x.id === r.id; }) < 3;
+        p.update(dt, now, S.over ? (top ? "wave" : "result") : "hold", intro ? launchPose(S.t, false) : { remote: true });
+      });
+    }
     const shot = direct(S, dt, now);
-    V.shot = shot;
+    V.shot = shot; V.lastShot = shot;
     if (S) {
       const me = S.me();
       const camPos = V.camera.position;
+      const intro = S.phase() === "intro";
       V.drones.forEach(function (d) {
         DR.Drone.update(d, S, dt, now, camPos);
+        if (intro && V.pilots[d.r.id]) launchDrone(d, V.pilots[d.r.id], S.t, d.r.id);
+        else { d.launched = true; d.root.scale.setScalar(1); }
         const r = d.r;
         d.root.visible = !r.left && !(d.own && (shot === "fpv" || shot === "goggles")) && (d.own || !!(r.rb && r.rb.length) || S.phase() !== "hunt");
         const D = r.disp, gy = V.T.terrain(D.x, D.z);
@@ -279,21 +370,11 @@ globalThis.DR = globalThis.DR || {};
         d.blob.material.opacity = U.clamp(1 - hgt / 30, 0, 1);
         d.blob.visible = d.root.visible && hgt < 30;
       });
-      const st = V.T.stand;
-      const near = Math.hypot(camPos.x - st.x, camPos.z - st.z) < 110;
-      V.pilots.forEach(function (p, i) {
-        if (!p) return;
-        const r = S.racers[i];
-        p.root.visible = !r.left && near;
-        if (!p.root.visible) return;
-        const top = S.over && S.results && S.results.findIndex(function (x) { return x.id === r.id; }) < 3;
-        p.update(dt, now, S.over ? (top ? "wave" : "result") : "hold");
-      });
       updateFx(S, dt);
       const fpvFov = 80 + (me ? U.clamp((me.disp.speed - 20) / 30, 0, 1) * 4 : 0);
-      const goal = shot === "fpv" || shot === "goggles" ? fpvFov : shot === "chase" || shot === "down" ? 70 : 50;
+      const goal = shot === "fpv" || shot === "goggles" ? fpvFov : shot === "chase" || shot === "down" ? 70 : shot === "toss" ? 58 : 50;
       if (Math.abs(V.camera.fov - goal) > 0.05) {
-        V.camera.fov = shot === "goggles" || shot === "pilot" ? goal : U.lerp(V.camera.fov, goal, Math.min(1, dt * 4));
+        V.camera.fov = shot === "goggles" || shot === "walk" ? goal : U.lerp(V.camera.fov, goal, Math.min(1, dt * 4));
         V.camera.updateProjectionMatrix();
       }
     }

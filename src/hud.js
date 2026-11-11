@@ -6,7 +6,7 @@ globalThis.DR = globalThis.DR || {};
 (function (DR) {
   "use strict";
   const U = DR.U, CFG = DR.CFG;
-  const H = { locale: "en", portraits: {}, last: {} };
+  const H = { locale: "en", portraits: {}, last: {}, sensor: true };
 
   const STR = {
     en: {
@@ -17,8 +17,12 @@ globalThis.DR = globalThis.DR || {};
       pilot: "PILOT", brief: "3:00 · down as many target drones as you can · they shoot back",
       leftRace: "{name} left", host: "You're the host now", down: "SHOT DOWN", respawn: "Back in {n}",
       kill: "+1", ace: "+3 ACE!", lastMin: "1 MINUTE LEFT", last10: "", over: "TIME!", watching: "Watching",
-      keys: "Arrows / WASD: fly · Space: fire (hold) · Shift: brake · C: camera · M: sound · I: invert climb",
-      still: "still flying…"
+      keys: "Arrows / WASD: fly · Space: fire (hold) · Q / E: barrel roll · X: flip · Shift: brake · O: obstacle sensor · C: camera · M: sound",
+      still: "still flying…",
+      sensorOn: "Obstacle sensor ON", sensorOff: "Obstacle sensor OFF", crash: "HIT A {what}! −{n}", dodged: "DODGED!",
+      ob_lamppost: "LAMPPOST", ob_billboard: "BILLBOARD", ob_rooftop_unit: "ROOFTOP UNIT", ob_water_tower: "WATER TOWER", ob_mast: "MAST",
+      ob_tree: "TREE", ob_rock: "ROCK", ob_building: "BUILDING", ob_hillside: "HILLSIDE", ob_ground: "GROUND",
+      roll: "ROLL", flip: "FLIP", ready: "READY"
     },
     "pt-PT": {
       go: "CAÇA!", wrong: "SENTIDO ERRADO", pts: "PTS", left: "saiu", leftN: "faltam {n} alvos", none: "Bando abatido!",
@@ -28,8 +32,12 @@ globalThis.DR = globalThis.DR || {};
       pilot: "PILOTO", brief: "3:00 · abate o máximo de drones-alvo · eles disparam de volta",
       leftRace: "{name} saiu", host: "Agora és o anfitrião", down: "ABATIDO", respawn: "De volta em {n}",
       kill: "+1", ace: "+3 ÁS!", lastMin: "FALTA 1 MINUTO", last10: "", over: "TEMPO!", watching: "A assistir",
-      keys: "Setas / WASD: voar · Espaço: disparar · Shift: travar · C: câmara · M: som · I: inverter subida",
-      still: "ainda a voar…"
+      keys: "Setas / WASD: voar · Espaço: disparar · Q / E: tonneau · X: mortal · Shift: travar · O: sensor · C: câmara · M: som",
+      still: "ainda a voar…",
+      sensorOn: "Sensor de obstáculos LIGADO", sensorOff: "Sensor de obstáculos DESLIGADO", crash: "BATESTE NUM(A) {what}! −{n}", dodged: "ESQUIVASTE!",
+      ob_lamppost: "CANDEEIRO", ob_billboard: "PAINEL", ob_rooftop_unit: "EQUIPAMENTO", ob_water_tower: "DEPÓSITO", ob_mast: "MASTRO",
+      ob_tree: "ÁRVORE", ob_rock: "ROCHA", ob_building: "PRÉDIO", ob_hillside: "ENCOSTA", ob_ground: "CHÃO",
+      roll: "TONNEAU", flip: "MORTAL", ready: "PRONTO"
     }
   };
   function t(key, vars) {
@@ -181,13 +189,14 @@ globalThis.DR = globalThis.DR || {};
     const now = performance.now() / 1000;
     const flying = !!S && (shot === "fpv" || shot === "chase" || shot === "goggles" || shot === "watch" || shot === "over" || shot === "down");
     $("hud").classList.toggle("off", !flying);
-    $("intro").hidden = !(shot === "pilot" || shot === "shoulder");
+    const introShot = shot === "walk" || shot === "toss" || shot === "shoulder";
+    $("intro").hidden = !introShot;
     $("osd").hidden = shot !== "fpv";
     $("cross").hidden = !(shot === "fpv" || shot === "chase") || !me || S.phase() !== "hunt";
     if (!S) { drawStatic(0); return; }
     const ph = S.phase();
 
-    if (me && (shot === "pilot" || shot === "shoulder")) {
+    if (me && introShot) {
       const src = H.portrait(me);
       if (H.last.introImg !== src) { $("introImg").src = src || BLANK; H.last.introImg = src; }
       set($("introName"), "introName", me.name);
@@ -296,6 +305,22 @@ globalThis.DR = globalThis.DR || {};
       if (d < 35 && (dx * b.vx + dy * b.vy + dz * b.vz) / (d * CFG.boltSpeed) > 0.9) incoming = true;
     });
     $("incoming").classList.toggle("on", incoming);
+
+    // Obstacle sensor: what's ahead and how close, amber then red.
+    const warnOn = H.sensor && me && ph === "hunt" && me.downT <= 0 && me.warn < CFG.sensor && (shot === "fpv" || shot === "chase");
+    const px = $("prox");
+    if (warnOn) {
+      const close = me.warn < 6;
+      set(px, "prox", "⚠ " + (t("ob_" + me.warnKind.replace(" ", "_")) || me.warnKind.toUpperCase()) + " · " + Math.round(me.warn) + " m");
+      px.className = "on" + (close ? " close" : "");
+    } else if (px.className) { px.className = ""; H.last.prox = null; }
+    // Trick readiness pip.
+    if (me) {
+      const ready = me.trickCd <= 0;
+      set($("trick"), "trick", me.trick ? t(me.trick === "flip" ? "flip" : "roll") + "!" : ready ? "Q · E · X  " + t("ready") : "Q · E · X");
+      $("trick").className = me.trick ? "go" : ready ? "ok" : "";
+      $("trickBar").style.width = Math.round((1 - me.trickCd / CFG.trickCd) * 100) + "%";
+    }
 
     if (shot === "fpv" && me) {
       const v = 16.8 - Math.min(2.4, Math.max(0, S.huntT()) / 75);

@@ -191,7 +191,7 @@ globalThis.DR = globalThis.DR || {};
     body.add(scene);
     const mixer = new THREE.AnimationMixer(scene);
     const act = {};
-    ["idle", "wave"].forEach(function (n) {
+    ["idle", "walk", "wave"].forEach(function (n) {
       if (!e.clips[n]) return;
       const a = mixer.clipAction(e.clips[n]);
       a.play(); a.setEffectiveWeight(n === "idle" ? 1 : 0);
@@ -205,17 +205,40 @@ globalThis.DR = globalThis.DR || {};
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.03; root.add(ring);
     const tmp = { c: new THREE.Vector3(), h: new THREE.Vector3(), n: new THREE.Vector3(), t: new THREE.Vector3(), x: new THREE.Vector3(),
       f: new THREE.Vector3(), m: new THREE.Matrix4(), gl: new THREE.Vector3(), gr: new THREE.Vector3(), up: new THREE.Vector3() };
-    let waveW = 0;
+    let waveW = 0, walkW = 0;
+    const handOut = new THREE.Vector3();
     return {
       root: root, kind: "avatar", remote: remote,
       head: function () { return rig.head.getWorldPosition(new THREE.Vector3()); },
-      update: function (dt, now, mood) {
-        // Clips first (idle, or a wave when celebrating), then the pose on top.
+      hand: function () { return handOut.clone(); },
+      update: function (dt, now, mood, L) {
+        // Clips first (idle / walk, or a wave when celebrating), then the pose on top.
         waveW = U.approach(waveW, mood === "wave" && act.wave ? 1 : 0, dt * 3);
+        walkW = U.approach(walkW, L && L.walk && act.walk ? 1 : 0, dt * 5);
         e.bones.forEach(function (b, i) { b.quaternion.copy(e.rest[i]); });
-        if (act.idle) act.idle.setEffectiveWeight(1 - waveW);
+        if (act.idle) act.idle.setEffectiveWeight(Math.max(0, 1 - waveW - walkW));
+        if (act.walk) act.walk.setEffectiveWeight(walkW);
         if (act.wave) act.wave.setEffectiveWeight(waveW);
         mixer.update(dt);
+        root.updateMatrixWorld(true);
+        rig.armR.hand.getWorldPosition(handOut);
+        // The launch: carrying the drone, winding up, throwing it skyward.
+        if (L && !L.remote) {
+          remote.root.visible = false;
+          const C = tmp.c, H = tmp.h, F = tmp.f, R = tmp.x, UP = tmp.up.set(0, 1, 0);
+          rig.chest.getWorldPosition(C); rig.head.getWorldPosition(H);
+          F.set(0, 0, -1).transformDirection(root.matrixWorld);
+          R.set(1, 0, 0).transformDirection(root.matrixWorld);
+          const sc = e.scale * (HEIGHT / 1.7);
+          const a = armPose(L.a, C, H, F, R, UP, sc), b = armPose(L.b, C, H, F, R, UP, sc);
+          tmp.gr.copy(a).lerp(b, U.ease(L.k));
+          const pole = new THREE.Vector3(0.7, L.b === "throw" ? -0.2 : -1, L.b === "throw" ? 0.5 : 0.2).transformDirection(root.matrixWorld);
+          reach(rig.armR, tmp.gr, pole);
+          rig.armR.hand.getWorldPosition(handOut);
+          // Eyes follow the drone up as it goes.
+          avTurn(scene, rig.head, 1, 0, 0, L.b === "throw" || L.look ? 0.35 : 0);
+          return;
+        }
         root.updateMatrixWorld(true);
         const look = 1 - waveW;
         avTurn(scene, rig.chest, 1, 0, 0, -0.12 * look);
@@ -251,6 +274,15 @@ globalThis.DR = globalThis.DR || {};
     };
   }
 
+  // Where the right hand goes for each launch stage, in the pilot's own frame.
+  function armPose(stage, C, H, F, R, UP, sc) {
+    const p = new THREE.Vector3();
+    if (stage === "windup") p.copy(C).addScaledVector(F, -0.12 * sc).addScaledVector(R, 0.34 * sc).addScaledVector(UP, -0.4 * sc);
+    else if (stage === "throw") p.copy(H).addScaledVector(F, 0.34 * sc).addScaledVector(R, 0.14 * sc).addScaledVector(UP, 0.42 * sc);
+    else p.copy(C).addScaledVector(F, 0.4 * sc).addScaledVector(R, 0.16 * sc).addScaledVector(UP, -0.02 * sc);   // carry
+    return p;
+  }
+
   // A plain figure, posed holding the remote: a robot for bots, a pilot in a
   // hoodie for people whose avatar isn't available.
   function figurePilot(r) {
@@ -259,8 +291,22 @@ globalThis.DR = globalThis.DR || {};
     const robot = r.bot;
     const cloth = lam(robot ? 0xb8c0d0 : r.colour), dark = lam(robot ? 0x5a6478 : 0x2b3245), skin = lam(robot ? 0xd8dde8 : 0xe0b08a);
     const add = function (geo, mat, x, y, z, rx) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); if (rx) m.rotation.x = rx; root.add(m); return m; };
-    [-0.11, 0.11].forEach(function (x) { add(new THREE.BoxGeometry(0.15, 0.82, 0.17), dark, x, 0.41, 0); });
+    // Legs on hip pivots, so they can swing when walking.
+    const legs = [-0.11, 0.11].map(function (x) {
+      const piv = new THREE.Group(); piv.position.set(x, 0.82, 0); root.add(piv);
+      const m = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.82, 0.17), dark); m.position.y = -0.41; piv.add(m);
+      return piv;
+    });
     add(new THREE.BoxGeometry(0.42, 0.56, 0.24), cloth, 0, 1.1, 0);
+    // Straight arms on shoulder pivots, for the launch (the bent "remote" arms hide meanwhile).
+    const straight = [-1, 1].map(function (s) {
+      const piv = new THREE.Group(); piv.position.set(s * 0.27, 1.34, 0); root.add(piv);
+      const m = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.62, 0.12), cloth); m.position.y = -0.31; piv.add(m);
+      const hand = new THREE.Object3D(); hand.position.y = -0.64; piv.add(hand);
+      piv.visible = false; piv.userData.hand = hand;
+      return piv;
+    });
+    const bent = [];
     const head = new THREE.Group(); head.position.set(0, 1.5, 0); root.add(head);
     head.rotation.x = -0.45;
     const hm = new THREE.Mesh(robot ? new THREE.BoxGeometry(0.26, 0.24, 0.26) : new THREE.IcosahedronGeometry(0.15, 1), skin);
@@ -276,8 +322,8 @@ globalThis.DR = globalThis.DR || {};
     }
     // Arms bent forward to the remote.
     [-1, 1].forEach(function (s) {
-      add(new THREE.BoxGeometry(0.11, 0.34, 0.12), cloth, s * 0.27, 1.18, -0.05, 0.5);
-      add(new THREE.BoxGeometry(0.1, 0.3, 0.1), cloth, s * 0.2, 1.0, -0.24, 1.35);
+      bent.push(add(new THREE.BoxGeometry(0.11, 0.34, 0.12), cloth, s * 0.27, 1.18, -0.05, 0.5));
+      bent.push(add(new THREE.BoxGeometry(0.1, 0.3, 0.1), cloth, s * 0.2, 1.0, -0.24, 1.35));
     });
     const remote = makeRemote(r.colour);
     remote.root.position.set(0, 1.0, -0.4);
@@ -287,12 +333,28 @@ globalThis.DR = globalThis.DR || {};
       new THREE.MeshBasicMaterial({ color: r.colour, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.03; root.add(ring);
     let hop = 0;
+    // Arm angle forward from hanging (radians) for each launch stage.
+    const ANG = { carry: 1.35, windup: -0.7, throw: 2.85 };
     return {
       root: root, kind: "figure", remote: remote,
       head: function () { return head.getWorldPosition(new THREE.Vector3()); },
-      update: function (dt, now, mood) {
+      hand: function () { root.updateMatrixWorld(true); return straight[1].userData.hand.getWorldPosition(new THREE.Vector3()); },
+      update: function (dt, now, mood, L) {
         remote.sticks[0].rotation.set(Math.sin(now * 3.1) * 0.25, 0, Math.sin(now * 2.3) * 0.2);
         remote.sticks[1].rotation.set(Math.sin(now * 2.6 + 1) * 0.25, 0, Math.sin(now * 3.7) * 0.2);
+        const launching = !!(L && !L.remote);
+        remote.root.visible = !launching;
+        bent.forEach(function (m) { m.visible = !launching; });
+        straight.forEach(function (p) { p.visible = launching; });
+        const sw = L && L.walk ? Math.sin(now * 9) * 0.5 : 0;
+        legs[0].rotation.x = sw; legs[1].rotation.x = -sw;
+        if (launching) {
+          straight[1].rotation.x = U.lerp(ANG[L.a] || 0, ANG[L.b] || 0, U.ease(L.k));
+          straight[1].rotation.z = 0.1;
+          straight[0].rotation.x = -sw * 0.8;
+          head.rotation.x = L.b === "throw" || L.look ? 0.35 : -0.1;
+          return;
+        }
         hop = mood === "wave" ? Math.abs(Math.sin(now * 6)) * 0.12 : 0;
         root.children.forEach(function (c) { if (c.userData.y0 === undefined) c.userData.y0 = c.position.y; c.position.y = c.userData.y0 + hop; });
         head.rotation.x = mood === "wave" ? -0.05 : -0.45;

@@ -143,8 +143,8 @@ globalThis.DR = globalThis.DR || {};
     d.tilt.rotation.set(P.pitch, 0, P.roll, "YXZ");
     // Props: idle on the pad, full speed in the air, stopped when shot down.
     const ph = S.phase();
-    const armed = (ph === "hunt" || ph === "over" || (ph === "count" && S.t > DR.CFG.intro + 0.8)) && !(r.downT > 0);
-    const rate = armed ? 60 + P.speed * 2 : ph === "count" ? 18 : 0;
+    const armed = (ph === "hunt" || ph === "over" || ph === "count" || d.launched) && !(r.downT > 0);
+    const rate = armed ? 60 + P.speed * 2 : 0;
     d.props.forEach(function (p) {
       p.rotation.y += rate * dt * p.userData.dir;
       if (p.userData.disc) { p.userData.disc.visible = rate > 30; p.userData.blade.visible = rate <= 30; }

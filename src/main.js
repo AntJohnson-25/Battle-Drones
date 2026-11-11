@@ -93,6 +93,8 @@ globalThis.DR = globalThis.DR || {};
     if (code === "KeyC") DR.View.toggleCamera();
     else if (code === "KeyM") DR.Audio.toggle();
     else if (code === "KeyI") DR.Input.toggleInvert();
+    else if (code === "KeyO") { DR.Hud.sensor = !DR.Hud.sensor; DR.Hud.toast(DR.Hud.t(DR.Hud.sensor ? "sensorOn" : "sensorOff")); }
+    else if ((code === "KeyQ" || code === "KeyE" || code === "KeyX") && S && !DR.Input.held) S.input.trick = code === "KeyQ" ? "rollL" : code === "KeyE" ? "rollR" : "flip";
     else if ((code === "Enter" || code === "NumpadEnter") && S && S.over && !$("results").hidden) startRound(G.course);
   }
   addEventListener("pointerdown", function () { DR.Audio.wake(); });
@@ -157,12 +159,7 @@ globalThis.DR = globalThis.DR || {};
     const st = DR.Pilot.avatarStates();
     G.S.racers.forEach(function (r, i) {
       const p = DR.View.pilots[i];
-      if (p && p.kind === "figure" && r.hl && st[r.hl] && st[r.hl].state === "ready") {
-        DR.World.stand.root.remove(p.root);
-        const np = DR.Pilot.make(r, DR.World.stand.slots[i % 8]);
-        DR.World.stand.root.add(np.root);
-        DR.View.pilots[i] = np;
-      }
+      if (p && p.kind === "figure" && r.hl && st[r.hl] && st[r.hl].state === "ready") DR.View.replacePilot(i, r);
     });
   }
 
@@ -179,7 +176,9 @@ globalThis.DR = globalThis.DR || {};
       else if (e.k === "ouch") { A.play("ouch"); V.shake = 1; }
       else if (e.k === "down") { A.play("down"); if (me) V.boom(me.x, me.y, me.z, false); }
       else if (e.k === "respawn") A.play("respawn");
-      else if (e.k === "bonk") { A.play("bonk"); V.shake = 0.6; }
+      else if (e.k === "crash") { A.play("crash"); V.shake = 1.2; H.flash(H.t("crash", { what: H.t("ob_" + e.kind.replace(" ", "_")) || e.kind, n: e.dmg }), "warn", 1.3); }
+      else if (e.k === "trick") A.play(e.t === "flip" ? "flip" : "roll");
+      else if (e.k === "dodge") { A.play("dodge"); H.points(H.t("dodged"), false); }
       else if (e.k === "over") { A.play("over"); H.flash(H.t("over"), "info", 1.4); }
     });
   }
@@ -196,6 +195,11 @@ globalThis.DR = globalThis.DR || {};
       const left = Math.ceil(S.left());
       if (left <= 60 && left > 55 && !G.minWarned) { G.minWarned = true; DR.Hud.flash(DR.Hud.t("lastMin"), "info", 2); DR.Audio.play("beep"); }
       if (left <= 10 && left !== G.lastSec) { G.lastSec = left; DR.Audio.play("tick"); }
+    }
+    // Obstacle sensor: beeps faster the closer you get, like a parking sensor.
+    if (me && DR.Hud.sensor && ph === "hunt" && me.downT <= 0 && me.warn < DR.CFG.sensor) {
+      const now = performance.now() / 1000, gap = 0.05 + (me.warn / DR.CFG.sensor) * 0.4;
+      if (now - (G.beepT || 0) > gap) { G.beepT = now; DR.Audio.play(me.warn < 6 ? "prox2" : "prox"); }
     }
     const armed = !!me && me.downT <= 0 && (ph === "hunt" || (ph === "count" && S.t > DR.CFG.intro + 0.8)) && DR.View.shot !== "results";
     DR.Audio.motor(armed, me ? me.disp.speed : 0, false);
