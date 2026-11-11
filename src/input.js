@@ -1,4 +1,4 @@
-// Keyboard. Arrows (or WASD) fly, Space / Enter fires the pickup, Shift brakes,
+// Keyboard. Arrows (or WASD) fly, Space (or J) held fires, Shift brakes,
 // C swaps FPV and chase camera, M mutes, I inverts climb. Esc is HopLobby's.
 globalThis.DR = globalThis.DR || {};
 (function (DR) {
@@ -19,7 +19,8 @@ globalThis.DR = globalThis.DR || {};
   const k = function (a, b) { return I.keys.has(a) || I.keys.has(b); };
   // Fill the race's input from the keys.
   I.read = function (inp) {
-    if (I.held) { inp.steer = 0; inp.climb = 0; inp.brake = false; return; }
+    if (I.held) { inp.steer = 0; inp.climb = 0; inp.brake = false; inp.fire = false; return; }
+    inp.fire = k("Space", "KeyJ");
     inp.steer = (k("ArrowLeft", "KeyA") ? 1 : 0) - (k("ArrowRight", "KeyD") ? 1 : 0);
     const c = (k("ArrowUp", "KeyW") ? 1 : 0) - (k("ArrowDown", "KeyS") ? 1 : 0);
     inp.climb = I.invert ? -c : c;

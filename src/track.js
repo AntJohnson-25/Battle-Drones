@@ -1,35 +1,43 @@
-// The course: one closed loop of gates over a low-poly valley. Pure data and maths
-// (no three.js), so the race can run in Node for tests. Every player builds the
-// same track from the same numbers.
+// The two courses, City and Mountain: a closed flight line the target drones flee
+// along, plus the ground (and, in the city, the buildings) as a height function.
+// Pure data and maths (no three.js), so whole rounds run in Node for tests.
+// Every player builds the same course from the same numbers.
 globalThis.DR = globalThis.DR || {};
 (function (DR) {
   "use strict";
   const U = DR.U;
 
-  // Centreline control points [x, y (height), z] in metres. The loop runs from the
-  // start straight (heading -Z), over a ridge, down a valley, round a hairpin,
-  // through a low dip and back along a high sweeper.
-  const POINTS = [
-    [0, 6, 150], [0, 7, 60], [15, 10, -20], [60, 22, -90], [130, 20, -140], [200, 8, -125],
-    [245, 6, -60], [235, 9, 0], [190, 13, 25], [150, 6, -5], [105, 5, 30], [115, 12, 100],
-    [90, 22, 170], [40, 16, 240], [-30, 10, 260], [-60, 8, 220], [-35, 7, 185]
-  ];
-  const GATES = 16;              // gates per lap; gate 0 is the start/finish arch
-  const GATE_W = 12, GATE_H = 8; // opening, metres
-  const BOX_ROWS = [0.27, 0.6, 0.86];   // pickup rows, as a fraction of the lap
+  // Centreline control points [x, y (height), z] in metres.
+  const COURSES = {
+    // Downtown: a long avenue, a climb between towers, a plaza swoop, the riverside and back.
+    city: {
+      name: "city", ceiling: 112, boundary: 60,
+      points: [
+        [0, 12, 170], [0, 14, 60], [6, 18, -50], [55, 26, -125], [150, 34, -140], [225, 22, -85],
+        [235, 14, 10], [190, 11, 75], [125, 20, 60], [85, 30, 120], [95, 18, 205], [40, 13, 265],
+        [-45, 12, 265], [-90, 16, 210], [-55, 12, 185]
+      ]
+    },
+    // Alpine: valley floor, over a high col, down a gorge, round the lake and back up.
+    mountain: {
+      name: "mountain", ceiling: 160, boundary: 70,
+      points: [
+        [0, 8, 190], [0, 10, 75], [20, 16, -25], [75, 38, -115], [165, 34, -175], [255, 12, -155],
+        [310, 8, -75], [295, 14, 0], [240, 22, 30], [190, 9, -5], [130, 7, 40], [145, 18, 125],
+        [115, 34, 215], [50, 24, 300], [-40, 14, 325], [-75, 10, 275], [-45, 9, 230]
+      ]
+    }
+  };
   const SAMPLES = 2400;
-
-  // Terrain grid (also used to build the mesh, so the drones and the ground agree).
-  const T0X = -360, T0Z = -390, TSIZE = 900, TCELL = 7.5, TN = TSIZE / TCELL;   // 120 cells a side
 
   function catmull(p0, p1, p2, p3, t) {
     const t2 = t * t, t3 = t2 * t;
     return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
   }
 
-  function build() {
-    const n = POINTS.length;
-    // Sample the closed spline, then index it by distance along the lap.
+  function build(course) {
+    const C = COURSES[course] || COURSES.city;
+    const POINTS = C.points, n = POINTS.length;
     const raw = [];
     for (let i = 0; i < SAMPLES; i++) {
       const f = (i / SAMPLES) * n, k = Math.floor(f), t = f - k;
@@ -42,7 +50,6 @@ globalThis.DR = globalThis.DR || {};
       cum.push(cum[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]));
     }
     const len = cum[SAMPLES];
-    // Evenly spaced points by distance (1 m apart, roughly), with tangents.
     const M = Math.round(len);
     const pts = new Float32Array(M * 3), tan = new Float32Array(M * 3);
     let j = 0;
@@ -61,8 +68,7 @@ globalThis.DR = globalThis.DR || {};
     }
     const step = len / M;
 
-    const T = { len: len, M: M, pts: pts, tan: tan, laps: 3 };
-    // Point on the line at distance s (wraps round the lap).
+    const T = { course: C.name, len: len, M: M, pts: pts, tan: tan, ceiling: C.ceiling, boundary: C.boundary };
     T.at = function (s) {
       s = ((s % len) + len) % len;
       const f = s / step, i = Math.floor(f) % M, k = (i + 1) % M, u = f - Math.floor(f);
@@ -72,7 +78,6 @@ globalThis.DR = globalThis.DR || {};
         tx: tan[i * 3], ty: tan[i * 3 + 1], tz: tan[i * 3 + 2]
       };
     };
-    // Nearest point on the line. With a hint (last index) it searches nearby only.
     T.nearest = function (x, z, hint) {
       let best = -1, bd = Infinity;
       if (hint !== undefined && hint >= 0) {
@@ -89,62 +94,79 @@ globalThis.DR = globalThis.DR || {};
       }
       return { i: best, s: best * step, d: Math.sqrt(bd) };
     };
+    // Signed distance from a to b along the loop, -len/2..len/2.
+    T.ahead = function (a, b) { const d = b - a; return ((d % len) + len * 1.5) % len - len / 2; };
 
-    // Gates, evenly spaced; gate 0 sits a little way into the lap so the grid fits behind it.
-    T.gates = [];
-    for (let g = 0; g < GATES; g++) {
-      const s = 40 + (g / GATES) * len;
-      const p = T.at(s);
-      const hl = Math.hypot(p.tx, p.tz) || 1;
-      const nx = p.tx / hl, nz = p.tz / hl;
-      T.gates.push({
-        i: g, s: s, x: p.x, y: p.y, z: p.z, nx: nx, nz: nz, sx: -nz, sz: nx,   // n = through the gate, s = to its right
-        w: g === 0 ? 16 : GATE_W, h: g === 0 ? 10 : GATE_H
-      });
-    }
-    T.startS = T.gates[0].s;
-
-    // Pickup rows: four boxes across the line.
-    T.boxes = [];
-    BOX_ROWS.forEach(function (f) {
-      const p = T.at(f * len);
-      const hl = Math.hypot(p.tx, p.tz) || 1, sx = -p.tz / hl, sz = p.tx / hl;
-      for (let b = 0; b < 4; b++) {
-        const o = (b - 1.5) * 3.2;
-        T.boxes.push({ x: p.x + sx * o, y: p.y, z: p.z + sz * o });
-      }
-    });
-
-    // Starting grid: rows of four behind the start arch, facing down the straight.
+    T.startS = 40;
+    // Launch pads: two rows of four behind the start, facing down the line.
     T.grid = [];
-    for (let k = 0; k < 16; k++) {
+    for (let k = 0; k < 8; k++) {
       const row = Math.floor(k / 4), col = k % 4;
       const p = T.at(T.startS - 14 - row * 7);
       const hl = Math.hypot(p.tx, p.tz) || 1, sx = -p.tz / hl, sz = p.tx / hl;
       const o = (col - 1.5) * 3.2 + (row % 2 ? 0.8 : -0.8);
       T.grid.push({ x: p.x + sx * o, z: p.z + sz * o, yaw: U.yawTo(p.tx, p.tz) });
     }
-
-    // The pilots' stand: beside the start straight, on the left, facing the track.
+    // The pilots' stand: beside the start, on the left, facing the line.
     {
       const p = T.at(T.startS - 30);
       const hl = Math.hypot(p.tx, p.tz) || 1, sx = -p.tz / hl, sz = p.tx / hl;
       const x = p.x - sx * 30, z = p.z - sz * 30;
-      T.stand = { x: x, z: z, yaw: U.yawTo(sx, sz), sx: -p.tx / hl, sz: -p.tz / hl };   // faces the track; s = along the stand
+      T.stand = { x: x, z: z, yaw: U.yawTo(sx, sz) };
     }
 
-    buildTerrain(T);
-    T.grid.forEach(function (g) { g.y = T.terrain(g.x, g.z) + 0.25; });
-    T.stand.y = T.terrain(T.stand.x, T.stand.z);
+    if (C.name === "city") buildCity(T); else buildMountain(T);
+    T.grid.forEach(function (g) { g.y = T.ground(g.x, g.z) + 0.25; });
+    T.stand.y = T.ground(T.stand.x, T.stand.z);
     return T;
   }
 
-  // Ground: a flat-ish valley along the line that rises into hills away from it.
-  // Where the line runs high, the ground under it rises too (the track crests a ridge).
-  function buildTerrain(T) {
+  // ------------------------------------------------------------------ city
+  // Flat streets with blocks of towers. T.terrain is the top of whatever is
+  // there (a roof, or the street), so flying into a wall bonks you off it.
+  const BLOCK = 34, CX0 = -300, CZ0 = -300, CN = 22;   // 22 x 22 blocks, 748 m a side
+  function buildCity(T) {
+    const rng = U.rng(2026);
+    const cells = new Int32Array(CN * CN).fill(-1);
+    const B = [];
+    let hint = -1;
+    const st = T.stand;
+    for (let iz = 0; iz < CN; iz++) {
+      for (let ix = 0; ix < CN; ix++) {
+        const cx = CX0 + (ix + 0.5) * BLOCK, cz = CZ0 + (iz + 0.5) * BLOCK;
+        const w = 16 + rng() * 12, d = 16 + rng() * 12, r1 = rng(), r2 = rng(), r3 = rng();
+        const nb = T.nearest(cx, cz, hint);
+        hint = nb.i;
+        const half = Math.hypot(w, d) / 2;
+        if (nb.d - half < 21) continue;                        // keep the flight corridor clear
+        if (Math.hypot(cx - st.x, cz - st.z) < 30 + half) continue;  // and the stand
+        if (r3 < 0.08 && nb.d > 60) continue;                    // the odd empty lot / plaza
+        const near = nb.d < 70;
+        const h = near ? 22 + r1 * 40 + (r2 > 0.8 ? 30 : 0) : 40 + r1 * 80;
+        cells[iz * CN + ix] = B.length;
+        B.push({ x: cx, z: cz, w: w, d: d, h: Math.round(h), tint: r2, style: Math.floor(r3 * 4) });
+      }
+    }
+    T.buildings = B;
+    T.ground = function () { return 0; };
+    T.terrain = function (x, z) {
+      const ix = Math.floor((x - CX0) / BLOCK), iz = Math.floor((z - CZ0) / BLOCK);
+      if (ix < 0 || iz < 0 || ix >= CN || iz >= CN) return 0;
+      const k = cells[iz * CN + ix];
+      if (k < 0) return 0;
+      const b = B[k];
+      return Math.abs(x - b.x) <= b.w / 2 && Math.abs(z - b.z) <= b.d / 2 ? b.h : 0;
+    };
+    T.extent = { x0: CX0, z0: CZ0, size: CN * BLOCK };
+  }
+
+  // ------------------------------------------------------------------ mountain
+  // A valley along the line, steep slopes either side and big peaks beyond.
+  const T0X = -420, T0Z = -460, TSIZE = 1000, TCELL = 8, TN = TSIZE / TCELL;
+  function buildMountain(T) {
     const N1 = TN + 1;
     const H = new Float32Array(N1 * N1);
-    const near = new Float32Array(N1 * N1);   // distance to the line, for colouring
+    const near = new Float32Array(N1 * N1);
     let hint = -1;
     for (let iz = 0; iz < N1; iz++) {
       for (let ix = 0; ix < N1; ix++) {
@@ -152,14 +174,15 @@ globalThis.DR = globalThis.DR || {};
         const nb = T.nearest(x, z, hint);
         hint = nb.i;
         const ty = T.pts[nb.i * 3 + 1];
-        const under = Math.max(0, ty - 10);
-        const n1 = Math.sin(x * 0.013 + 1.3) * Math.sin(z * 0.011 + 0.4);
-        const n2 = Math.sin(x * 0.031 + z * 0.017) * 0.5 + Math.sin(z * 0.043 - x * 0.021) * 0.3;
-        const floor = under + n2 * 0.6;
-        const hills = under + 14 + 12 * (n1 * 0.5 + 0.5) + 6 * n2;
-        const far = 30 + 40 * (n1 * 0.5 + 0.5) + 10 * n2;
-        let h = U.lerp(floor, hills, U.ease((nb.d - 24) / 50));
-        h = U.lerp(h, Math.max(h, far), U.ease((nb.d - 120) / 120));
+        const under = Math.max(0, ty - 12);
+        const n1 = Math.sin(x * 0.011 + 1.3) * Math.sin(z * 0.009 + 0.4);
+        const n2 = Math.sin(x * 0.029 + z * 0.017) * 0.5 + Math.sin(z * 0.041 - x * 0.023) * 0.3;
+        const n3 = Math.abs(Math.sin(x * 0.006 - 0.7) * Math.cos(z * 0.0055 + 1.1));
+        const floor = under + n2 * 0.8;
+        const slopes = under + 20 + 26 * (n1 * 0.5 + 0.5) + 8 * n2;
+        const peaks = 70 + 120 * n3 + 25 * (n1 * 0.5 + 0.5) + 12 * n2;
+        let h = U.lerp(floor, slopes, U.ease((nb.d - 26) / 45));
+        h = U.lerp(h, Math.max(h, peaks), U.ease((nb.d - 90) / 140));
         H[iz * N1 + ix] = h;
         near[iz * N1 + ix] = nb.d;
       }
@@ -171,7 +194,9 @@ globalThis.DR = globalThis.DR || {};
       const a = H[iz * N1 + ix], b = H[iz * N1 + ix + 1], c = H[(iz + 1) * N1 + ix], d = H[(iz + 1) * N1 + ix + 1];
       return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
     };
+    T.ground = T.terrain;
+    T.extent = { x0: T0X, z0: T0Z, size: TSIZE };
   }
 
-  DR.Track = { build: build };
+  DR.Track = { build: build, COURSES: Object.keys(COURSES) };
 })(globalThis.DR);

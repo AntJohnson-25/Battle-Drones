@@ -1,5 +1,5 @@
 // Sound, all synthesised with Web Audio (no sound files, so nothing to license):
-// the motor whine follows your speed; short blips for gates, laps, pickups and hits.
+// the motor whine follows your speed; short blips for shots, hits and explosions.
 globalThis.DR = globalThis.DR || {};
 (function (DR) {
   "use strict";
@@ -98,6 +98,16 @@ globalThis.DR = globalThis.DR || {};
       case "zap": tone(140, 0.4, "sawtooth", 0.15, 60); noise(0.3, 0.15, 5000, 1500); break;
       case "bonk": tone(110, 0.2, "square", 0.18, 60); break;
       case "miss": tone(300, 0.25, "square", 0.08, 200); break;
+      case "fire": tone(1700 + Math.random() * 200, 0.07, "square", 0.035, 500); break;
+      case "thit": tone(2200, 0.05, "triangle", 0.09); break;
+      case "kill": noise(0.55, 0.38, 2200, 120); tone(160, 0.45, "sawtooth", 0.14, 45); tone(1320, 0.1, "triangle", 0.1, 0, 0.05); break;
+      case "ace": noise(0.8, 0.45, 2600, 90); [880, 1175, 1568].forEach(function (f, i) { tone(f, 0.16, "square", 0.08, 0, 0.08 + i * 0.07); }); break;
+      case "efire": tone(620, 0.16, "sawtooth", 0.035, 220); break;
+      case "ouch": noise(0.25, 0.3, 900, 200); tone(240, 0.22, "square", 0.1, 90); break;
+      case "down": noise(1.1, 0.4, 1600, 60); tone(400, 1.0, "sawtooth", 0.12, 40); break;
+      case "respawn": [440, 660, 880].forEach(function (f, i) { tone(f, 0.12, "triangle", 0.1, 0, i * 0.07); }); break;
+      case "over": [784, 659, 523, 784, 1047].forEach(function (f, i) { tone(f, 0.2, "square", 0.09, 0, i * 0.12); }); break;
+      case "tick": tone(1000, 0.06, "square", 0.06); break;
     }
   };
 

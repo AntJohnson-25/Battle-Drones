@@ -135,27 +135,25 @@ globalThis.DR = globalThis.DR || {};
   }
   D.nameTag = nameTag;
 
-  // Per frame: position from the racer's drawing state, props, effects.
+  // Per frame: position from the pilot's drawing state, props, effects.
   D.update = function (d, S, dt, now, camPos) {
     const r = d.r, P = r.disp;
     d.root.position.set(P.x, P.y, P.z);
     d.root.rotation.set(0, P.yaw, 0);
-    // Spin-out after a dart: a fast yaw wobble that settles.
-    if (r.spinT > 0) d.spin += dt * 14 * Math.min(1, r.spinT / 0.4); else d.spin = 0;
-    d.tilt.rotation.set(P.pitch, d.spin, P.roll + (r.spinT > 0 ? Math.sin(now * 30) * 0.25 : 0), "YXZ");
-    // Props: idle on the pad, full speed in the air.
+    d.tilt.rotation.set(P.pitch, 0, P.roll, "YXZ");
+    // Props: idle on the pad, full speed in the air, stopped when shot down.
     const ph = S.phase();
-    const armed = ph === "race" || (ph === "count" && S.t > DR.CFG.intro + 0.8);
+    const armed = (ph === "hunt" || ph === "over" || (ph === "count" && S.t > DR.CFG.intro + 0.8)) && !(r.downT > 0);
     const rate = armed ? 60 + P.speed * 2 : ph === "count" ? 18 : 0;
     d.props.forEach(function (p) {
       p.rotation.y += rate * dt * p.userData.dir;
       if (p.userData.disc) { p.userData.disc.visible = rate > 30; p.userData.blade.visible = rate <= 30; }
     });
-    d.shield.visible = r.shieldT > 0;
-    if (d.shield.visible) { d.shield.rotation.y += dt; d.shield.material.opacity = 0.18 + Math.sin(now * 8) * 0.06 + (r.shieldT < 2 ? Math.sin(now * 30) * 0.1 : 0); }
-    d.flames.visible = r.turboT > 0;
-    if (d.flames.visible) d.flames.scale.set(1, 1, 0.8 + Math.random() * 0.5);
-    d.zap.visible = r.slowT > 0;
+    // Respawn shield bubble; smoke-black flicker while down.
+    d.shield.visible = r.invulnT > 0;
+    if (d.shield.visible) { d.shield.rotation.y += dt; d.shield.material.opacity = 0.16 + Math.sin(now * 10) * 0.06; }
+    d.flames.visible = false;
+    d.zap.visible = r.downT > 0;
     if (d.zap.visible) { d.zap.rotation.z = now * 9; d.zap.scale.setScalar(0.9 + Math.random() * 0.3); }
     if (d.tag) {
       // Name tags shrink away with distance but stay readable.
@@ -166,6 +164,66 @@ globalThis.DR = globalThis.DR || {};
       d.tag.visible = dist < 220;
     }
   };
+
+  // ------------------------------------------------------------------ target drones
+  // Hostile: a dark angular body, red (or gold, for an ace) lights, a glowing eye
+  // at the back facing you and a little gun pod. Bigger than yours so they read
+  // at a distance.
+  const tShared = {};
+  D.makeTarget = function (ace) {
+    if (!tShared.body) {
+      tShared.body = new THREE.OctahedronGeometry(0.5, 0); tShared.body.scale(1.1, 0.45, 1.4);
+      tShared.arm = new THREE.BoxGeometry(1.6, 0.06, 0.12);
+      tShared.rotor = new THREE.CircleGeometry(0.32, 12); tShared.rotor.rotateX(-Math.PI / 2);
+      tShared.eye = new THREE.SphereGeometry(0.17, 8, 6);
+      tShared.gun = new THREE.CylinderGeometry(0.05, 0.05, 0.6, 5); tShared.gun.rotateX(Math.PI / 2);
+      tShared.dark = lam(0x1d2129);
+      tShared.metal = lam(0x50586a);
+      tShared.hit = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    }
+    const glow = ace ? 0xffc23a : 0xff2d4a;
+    const root = new THREE.Group(), tilt = new THREE.Group();
+    root.add(tilt);
+    const body = new THREE.Mesh(tShared.body, tShared.dark); tilt.add(body);
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.08, 0.7), lam(glow)); plate.position.y = 0.2; tilt.add(plate);
+    [1, -1].forEach(function (s) { const a = new THREE.Mesh(tShared.arm, tShared.metal); a.rotation.y = s * 0.7; tilt.add(a); });
+    const discMat = new THREE.MeshBasicMaterial({ color: glow, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide });
+    const rotors = [];
+    [[0.6, -0.5], [-0.6, -0.5], [0.6, 0.5], [-0.6, 0.5]].forEach(function (p) {
+      const m = new THREE.Mesh(tShared.rotor, discMat); m.position.set(p[0], 0.1, p[1]); tilt.add(m); rotors.push(m);
+    });
+    const eyeMat = new THREE.MeshBasicMaterial({ color: glow });
+    const eye = new THREE.Mesh(tShared.eye, eyeMat); eye.position.set(0, 0.02, 0.62); tilt.add(eye);
+    const gun = new THREE.Mesh(tShared.gun, tShared.metal); gun.position.set(0, -0.2, 0.45); tilt.add(gun);
+    // A soft halo so it can be spotted against towers and hills.
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTex(), color: glow, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.55 }));
+    halo.scale.set(3.2, 3.2, 1); root.add(halo);
+    const sc = ace ? 2.6 : 2.0;
+    tilt.scale.setScalar(sc);
+    return { root: root, tilt: tilt, body: body, eyeMat: eyeMat, glow: glow, rotors: rotors, halo: halo, mats: [plate.material, eyeMat] };
+  };
+  D.updateTarget = function (m, tg, dt, now) {
+    m.root.position.set(tg.x, tg.y + Math.sin(now * 5 + tg.id) * 0.08, tg.z);
+    m.root.rotation.set(0, tg.yaw, 0);
+    m.tilt.rotation.set(-0.15, 0, tg.bank, "YXZ");
+    // Flash white when hit.
+    m.body.material = tg.flash > 0 ? tShared.hit : tShared.dark;
+    m.eyeMat.color.setHex(tg.fireT < 0.35 ? 0xffffff : m.glow);
+    m.halo.material.opacity = 0.45 + Math.sin(now * 6 + tg.id) * 0.12;
+  };
+  let haloT = null;
+  function haloTex() {
+    if (haloT) return haloT;
+    const c = document.createElement("canvas");
+    c.width = c.height = 64;
+    const x = c.getContext("2d");
+    const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, "rgba(255,255,255,0.9)"); g.addColorStop(0.35, "rgba(255,255,255,0.25)"); g.addColorStop(1, "rgba(255,255,255,0)");
+    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+    haloT = new THREE.CanvasTexture(c);
+    return haloT;
+  }
+  D.haloTex = haloTex;
 
   DR.Drone = D;
 })(globalThis.DR);

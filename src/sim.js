@@ -1,378 +1,380 @@
-// The race: flight, gates and laps, bots, pickup boxes and the five pickups.
-// Pure JavaScript (no three.js), so tools/net-test.js can run whole races in Node.
+// The hunt: your drone, your own pack of target drones fleeing along the course,
+// your shots, their return fire, getting shot down and respawning.
+// Pure JavaScript (no three.js), so tools/sim-test.js can run whole rounds in Node.
 //
-// Who runs what: the lobby host (or a player on their own) runs everything here.
-// Every other player flies only their own drone with this code and draws the rest
-// from the host's snapshots (net.js). The host decides laps, places, pickups and
-// hits: the relay passes along anything, so players never decide those themselves.
+// Who runs what: every player runs their OWN round here. Everyone gets the same
+// pack of targets (same seed, same order, same toughness), so it's fair, and
+// nothing that has to be quick goes over the network: your shots, their shots
+// and the hits all happen on your machine. Only positions (for the ghost drones
+// of the other pilots) and scores are shared (net.js).
 globalThis.DR = globalThis.DR || {};
 (function (DR) {
   "use strict";
   const U = DR.U;
 
   const CFG = DR.CFG = {
-    cruise: 30, brake: 17, turbo: 47, spinSpeed: 8, slowMul: 0.55, finishedCruise: 0.75,
-    turn: 1.75, brakeTurn: 1.35, climb: 13, accel: 22, decel: 34,
-    clearance: 1.2, ceiling: 85, boundary: 70,
-    intro: 6.5, count: 3, liftoff: 1.2, finishWait: 30, overWait: 2.5, maxRace: 480,
-    spinT: 1.3, slowT: 2.6, turboT: 2.2, shieldT: 10, smokeT: 5,
-    empR: 20, dartSpeed: 62, dartLife: 4, dartR: 2.4, dartTurn: 4.5,
-    boxR: 2.6, boxRespawn: 4, minField: 6, maxField: 16
+    // flight
+    cruise: 30, brake: 16, turn: 1.75, brakeTurn: 1.45, climb: 14, accel: 22, decel: 34, clearance: 1.2,
+    camTilt: 0.28,                      // the FPV camera and the guns point this far above the nose
+    // round
+    intro: 6.5, count: 3, round: 180, liftoff: 1.2, maxPilots: 8,
+    // you
+    hp: 100, downT: 3, invulnT: 2.5, bonkDmg: 6,
+    fireEvery: 1 / 7, shotSpeed: 170, shotLife: 1.05, assist: 0.11, assistRange: 175,
+    // them
+    pool: 60, alive: 5, spawnAhead: 85, tHp: 3, aceHp: 7, tR: 2.1, aceR: 2.7,
+    boltSpeed: 64, boltLife: 2.4, boltDmg: 11, aceDmg: 16, fireRange: 85, boltR: 1.5,
+    evadeR: 34, escapeAfter: 6, escapeBehind: 130
   };
-  // Item ids travel as numbers: 0 = none.
-  const ITEMS = DR.ITEMS = [null, "turbo", "dart", "shield", "emp", "smoke"];
-  const COLOURS = DR.COLOURS = [0xff6b5a, 0x58c4ff, 0xffd23f, 0x8affa0, 0xc792ff, 0xff9f43, 0x4dffe0, 0xff7ad9,
-    0xb8f05a, 0x7aa7ff, 0xffb3a1, 0x9cffd8, 0xe8e46a, 0xd49bff, 0x6ae0ff, 0xffc46a];
-  const BOT_NAMES = ["Zippy", "Rotor", "Bzzt", "Hover", "Quadzilla", "Propsy", "Whirly", "Nimbus", "Volt", "Kestrel",
-    "Dash", "Pixel", "Gusty", "Comet", "Swoop", "Echo"];
+  const COLOURS = DR.COLOURS = [0x58c4ff, 0xffd23f, 0x8affa0, 0xc792ff, 0xff9f43, 0x4dffe0, 0xff7ad9, 0xb8f05a];
 
-  // A new race. roster: [{ name, hl (lobby player id, or null for a bot), bot }].
-  function create(T, roster, opts) {
-    opts = opts || {};
-    const S = {
-      T: T, t: 0, laps: T.laps, client: !!opts.client, humanId: -1,
-      racers: [], boxes: T.boxes.map(function (b) { return { x: b.x, y: b.y, z: b.z, on: true, respawn: 0 }; }),
-      darts: [], nextDart: 1, events: [], over: false, overAt: 0, firstFinishT: -1, results: null,
-      input: { steer: 0, climb: 0, brake: false, use: false },
-      rand: opts.rand || Math.random
-    };
-    roster.forEach(function (r, i) {
-      const g = T.grid[i % T.grid.length];
-      S.racers.push({
-        id: i, name: r.name, hl: r.hl || null, bot: !!r.bot, left: false, colour: COLOURS[i % COLOURS.length],
-        x: g.x, y: g.y, z: g.z, px: g.x, py: g.y, pz: g.z, yaw: g.yaw, pitch: 0, roll: 0, speed: 0, vy: 0,
-        steerS: 0, gate: 0, lap: 0, passed: 0, finished: false, finishT: 0, place: i + 1, prog: 0,
-        item: 0, itemT: 0, useDelay: 1, hc: 0, ec: 0, spinT: 0, slowT: 0, turboT: 0, smokeT: 0, shieldT: 0,
-        sync: 0, near: -1, s: 0, bonkT: 0, missT: 0, wrongT: 0,
-        skill: 0.9 + ((i * 37) % 10) / 100, botOff: ((i * 53) % 7 - 3) * 0.9,
-        disp: { x: g.x, y: g.y, z: g.z, yaw: g.yaw, pitch: 0, roll: 0, speed: 0 }
+  // The pack: the same 60 targets, in the same order, for every pilot this round.
+  // Every 10th is an "ace": tougher, hits harder, worth 3.
+  function pack(seed) {
+    const r = U.rng(seed >>> 0);
+    const out = [];
+    for (let k = 0; k < CFG.pool; k++) {
+      const ace = k % 10 === 9;
+      out.push({
+        k: k, ace: ace, hp: ace ? CFG.aceHp : CFG.tHp, pts: ace ? 3 : 1,
+        spd: (ace ? 25 : 20) + r() * 5, lat: 3 + r() * 6, latW: 0.45 + r() * 0.6, ph: r() * 6.28,
+        alt: 1 + r() * 6, altA: 2 + r() * 3.5, altW: 0.35 + r() * 0.5, ph2: r() * 6.28,
+        gap: r() * 55, fireI: (ace ? 1.3 : 1.9) + r() * 1.4
       });
-    });
-    S.phase = function () { return S.t < CFG.intro ? "intro" : S.t < CFG.intro + CFG.count ? "count" : "race"; };
-    S.raceT = function () { return S.t - CFG.intro - CFG.count; };
-    S.me = function () { return S.humanId >= 0 ? S.racers[S.humanId] : null; };
-    return S;
-  }
-
-  // The lobby's humans plus bots up to the minimum field.
-  function roster(humans) {
-    const out = humans.slice(0, CFG.maxField).map(function (h) { return { name: h.name, hl: h.hl, bot: false }; });
-    for (let k = 0; out.length < CFG.minField; k++) out.push({ name: BOT_NAMES[k % BOT_NAMES.length], hl: null, bot: true });
+    }
     return out;
   }
 
+  // A new round. roster: [{ name, hl }]; t0: seconds already gone (a late joiner).
+  function create(T, roster, opts) {
+    opts = opts || {};
+    const seed = opts.seed === undefined ? 1 : opts.seed;
+    const S = {
+      T: T, t: opts.t0 || 0, seed: seed, humanId: -1, racers: [],
+      pack: pack(seed), next: 0, targets: [], shots: [], bolts: [], nextId: 1,
+      events: [], over: false, results: null, kills: 0, escaped: 0,
+      input: { steer: 0, climb: 0, brake: false, fire: false },
+      rand: U.rng((seed * 7919 + 17) >>> 0)
+    };
+    roster.slice(0, CFG.maxPilots).forEach(function (r, i) {
+      const g = T.grid[i % T.grid.length];
+      S.racers.push({
+        id: i, name: r.name, hl: r.hl || null, bot: false, left: false, colour: COLOURS[i % COLOURS.length],
+        x: g.x, y: g.y, z: g.z, yaw: g.yaw, pitch: 0, roll: 0, speed: 0, vy: 0, steerS: 0,
+        near: -1, s: T.startS - 14, hp: CFG.hp, downT: 0, invulnT: 0, bonkT: 0, hurtT: 0, wrongT: 0,
+        fireCd: 0, score: opts.score && i === opts.me ? opts.score : 0, lastKillT: 0, shotsFired: 0, shotsHit: 0, deaths: 0,
+        disp: { x: g.x, y: g.y, z: g.z, yaw: g.yaw, pitch: 0, roll: 0, speed: 0 }
+      });
+    });
+    S.phase = function () {
+      return S.t < CFG.intro ? "intro" : S.t < CFG.intro + CFG.count ? "count" : S.over ? "over" : "hunt";
+    };
+    S.huntT = function () { return S.t - CFG.intro - CFG.count; };
+    S.left = function () { return Math.max(0, CFG.round - S.huntT()); };
+    S.me = function () { return S.humanId >= 0 ? S.racers[S.humanId] : null; };
+    // A late joiner is placed on the line rather than the pad.
+    if (opts.t0 > CFG.intro + CFG.count && opts.me >= 0 && S.racers[opts.me]) respawnAt(S, S.racers[opts.me], T.startS + 20, false);
+    return S;
+  }
+
+  function roster(humans) {
+    return humans.slice(0, CFG.maxPilots).map(function (h) { return { name: h.name, hl: h.hl }; });
+  }
+
   // ------------------------------------------------------------------ flight
-  // Arcade flight: the drone always flies forward; steer turns, climb rises or
-  // dives, and with no climb input it holds its height (altitude assist).
   function fly(S, r, inp, dt) {
     const T = S.T;
-    r.px = r.x; r.py = r.y; r.pz = r.z;
     const ph = S.phase();
-    if (ph !== "race") { r.speed = 0; r.vy = 0; setDisp(r); return; }
-    const rt = S.raceT();
-    const ctl = r.spinT > 0 ? { steer: 0, climb: 0, brake: false } : inp;
-    let target = CFG.cruise * (r.bot ? r.skill * (r.rubber || 1) : 1);
-    if (r.finished) target = CFG.cruise * CFG.finishedCruise;
-    if (ctl.brake) target = CFG.brake;
-    if (r.turboT > 0) target = CFG.turbo;
-    if (r.slowT > 0) target *= CFG.slowMul;
-    if (r.spinT > 0) target = CFG.spinSpeed;
-    // Lift-off: a short climb off the pad so nobody clips the start arch.
-    if (rt < CFG.liftoff) target *= U.ease(rt / CFG.liftoff);
-    r.speed = U.approach(r.speed, target, (target > r.speed ? CFG.accel * (r.turboT > 0 ? 2 : 1) : CFG.decel) * dt);
-    r.steerS = U.approach(r.steerS, U.clamp(ctl.steer, -1, 1), 6 * dt);
-    r.yaw = U.wrap(r.yaw + CFG.turn * r.steerS * (ctl.brake ? CFG.brakeTurn : 1) * dt);
-    let climb = U.clamp(ctl.climb, -1, 1);
+    if (ph === "intro" || ph === "count") { r.speed = 0; r.vy = 0; setDisp(r); return; }
+    if (r.downT > 0) {
+      // Shot down: tumble to the ground, then respawn on the line behind.
+      r.downT -= dt;
+      r.vy -= 22 * dt; r.speed = U.approach(r.speed, 0, 12 * dt);
+      r.x += U.fwdX(r.yaw) * r.speed * dt; r.z += U.fwdZ(r.yaw) * r.speed * dt; r.y += r.vy * dt;
+      const gnd = T.terrain(r.x, r.z) + 0.4;
+      if (r.y < gnd) { r.y = gnd; r.vy = 0; r.speed = 0; }
+      r.roll += dt * 9; r.pitch = -0.8;
+      if (r.downT <= 0) { respawnAt(S, r, r.s - 18, true); S.events.push({ k: "respawn", p: r.id }); }
+      setDisp(r);
+      return;
+    }
+    const ht = S.huntT();
+    let target = CFG.cruise;
+    if (inp.brake) target = CFG.brake;
+    if (ht < CFG.liftoff && !r.late) target *= U.ease(ht / CFG.liftoff);
+    r.speed = U.approach(r.speed, target, (target > r.speed ? CFG.accel : CFG.decel) * dt);
+    r.steerS = U.approach(r.steerS, U.clamp(inp.steer, -1, 1), 6 * dt);
+    r.yaw = U.wrap(r.yaw + CFG.turn * r.steerS * (inp.brake ? CFG.brakeTurn : 1) * dt);
+    let climb = U.clamp(inp.climb, -1, 1);
     const ground0 = T.terrain(r.x, r.z);
-    if (rt < CFG.liftoff + 0.4 && r.y < ground0 + 5) climb = Math.max(climb, 0.8);
+    if (ht < CFG.liftoff + 0.4 && r.y < ground0 + 5) climb = Math.max(climb, 0.8);
     r.vy = U.approach(r.vy, climb * CFG.climb, 30 * dt);
     let nx = r.x + U.fwdX(r.yaw) * r.speed * dt, nz = r.z + U.fwdZ(r.yaw) * r.speed * dt, ny = r.y + r.vy * dt;
     const ground = T.terrain(nx, nz);
     if (ground + CFG.clearance > ny) {
       if (ground - ground0 > 1.8 && ground + CFG.clearance - ny > 1.5) {
-        // Flew into a hillside: bounce off it instead of climbing the wall.
-        nx = r.x; nz = r.z; r.speed *= 0.35; r.bonkT = 0.5;
-        S.events.push({ k: "bonk", p: r.id });
+        // Flew into a wall or a hillside: bounce off it (and it stings).
+        nx = r.x; nz = r.z; r.speed *= 0.35;
+        if (r.bonkT <= 0) { r.bonkT = 0.5; damage(S, r, CFG.bonkDmg, -1); S.events.push({ k: "bonk", p: r.id }); }
       }
       ny = Math.max(ny, T.terrain(nx, nz) + CFG.clearance);
       if (r.vy < 0) r.vy = 0;
     }
-    if (ny > CFG.ceiling) { ny = CFG.ceiling; if (r.vy > 0) r.vy = 0; }
-    // Invisible fence well outside the course.
+    if (ny > T.ceiling) { ny = T.ceiling; if (r.vy > 0) r.vy = 0; }
     const nb = T.nearest(nx, nz, r.near);
     r.near = nb.i; r.s = nb.s;
-    if (nb.d > CFG.boundary) {
-      const lx = T.pts[nb.i * 3], lz = T.pts[nb.i * 3 + 2], k = CFG.boundary / nb.d;
+    if (nb.d > T.boundary) {
+      const lx = T.pts[nb.i * 3], lz = T.pts[nb.i * 3 + 2], k = T.boundary / nb.d;
       nx = lx + (nx - lx) * k; nz = lz + (nz - lz) * k;
     }
     r.x = nx; r.y = ny; r.z = nz;
     r.roll = r.steerS * 0.6;
     r.pitch = -0.28 * (r.speed / CFG.cruise) + (r.vy / CFG.climb) * 0.3;
     if (r.bonkT > 0) r.bonkT -= dt;
+    // Wrong way: flying against the line for a while.
+    const dot = U.fwdX(r.yaw) * T.tan[r.near * 3] + U.fwdZ(r.yaw) * T.tan[r.near * 3 + 2];
+    r.wrongT = dot < -0.4 ? r.wrongT + dt : 0;
     setDisp(r);
   }
   function setDisp(r) {
     const d = r.disp;
     d.x = r.x; d.y = r.y; d.z = r.z; d.yaw = r.yaw; d.pitch = r.pitch; d.roll = r.roll; d.speed = r.speed;
   }
-
-  // Did the move from (px,py,pz) to (x,y,z) fly through the racer's next gate?
-  function crossesGate(g, r) {
-    const d0 = (r.px - g.x) * g.nx + (r.pz - g.z) * g.nz;
-    const d1 = (r.x - g.x) * g.nx + (r.z - g.z) * g.nz;
-    if (!(d0 < 0 && d1 >= 0)) return false;
-    const u = -d0 / Math.max(1e-6, d1 - d0);
-    const ix = r.px + (r.x - r.px) * u, iy = r.py + (r.y - r.py) * u, iz = r.pz + (r.z - r.pz) * u;
-    const side = (ix - g.x) * g.sx + (iz - g.z) * g.sz;
-    return Math.abs(side) <= g.w / 2 + 0.6 && Math.abs(iy - g.y) <= g.h / 2 + 0.6;
+  function respawnAt(S, r, s, shield) {
+    const p = S.T.at(s);
+    const nb = S.T.nearest(p.x, p.z);
+    r.x = p.x; r.z = p.z; r.y = Math.max(p.y + 2, S.T.terrain(p.x, p.z) + 3);
+    r.yaw = U.yawTo(p.tx, p.tz); r.pitch = 0; r.roll = 0; r.vy = 0; r.speed = 14; r.steerS = 0;
+    r.near = nb.i; r.s = nb.s; r.hp = CFG.hp; r.downT = 0; r.invulnT = shield ? CFG.invulnT : 0; r.late = true;
+    setDisp(r);
   }
 
-  // Gates in order; gate 0 starts each lap, and the last lap ends there.
-  function passGates(S, r) {
-    if (r.finished || r.left || S.phase() !== "race") return;
-    const T = S.T, g = T.gates[r.gate];
-    if (!crossesGate(g, r)) return;
-    r.passed++;
-    r.missT = 0;
-    if (r.gate === 0) {
-      if (r.lap >= S.laps) {
-        r.finished = true;
-        r.finishT = S.raceT();
-        if (S.firstFinishT < 0 && !r.bot) S.firstFinishT = S.t;
-        S.events.push({ k: "fin", p: r.id, t: U.r2(r.finishT) });
-        return;
-      }
-      r.lap++;
-      if (r.lap > 1) S.events.push({ k: "lap", p: r.id, l: r.lap });
+  function damage(S, r, n, by) {
+    if (r.downT > 0 || r.invulnT > 0 || S.phase() !== "hunt") return;
+    r.hp = Math.max(0, r.hp - n);
+    r.hurtT = 0.5;
+    if (r.hp <= 0) {
+      r.downT = CFG.downT; r.deaths++; r.vy = 2;
+      S.events.push({ k: "down", p: r.id, by: by });
     }
-    S.events.push({ k: "gate", p: r.id, g: r.gate });
-    r.gate = (r.gate + 1) % T.gates.length;
   }
 
-  // How far round the race a racer is, for places.
-  function progress(S, r) {
-    const T = S.T, g = T.gates[r.gate], pg = T.gates[(r.gate - 1 + T.gates.length) % T.gates.length];
-    const seg = Math.hypot(g.x - pg.x, g.y - pg.y, g.z - pg.z) || 1;
-    const d = Math.hypot(r.x - g.x, r.y - g.y, r.z - g.z);
-    return r.passed + U.clamp(1 - d / seg, 0, 0.99);
+  // Aim: where the nose (plus the camera tilt) points.
+  function aimDir(r) {
+    const p = r.pitch + CFG.camTilt, c = Math.cos(p);
+    return { x: U.fwdX(r.yaw) * c, y: Math.sin(p), z: U.fwdZ(r.yaw) * c };
+  }
+  DR.aimDir = aimDir;
+
+  // ------------------------------------------------------------------ targets
+  function targetPos(S, tg, s) {
+    const T = S.T, P = tg.spec, p = T.at(s);
+    const hl = Math.hypot(p.tx, p.tz) || 1, sx = -p.tz / hl, sz = p.tx / hl;
+    const wide = T.course === "city" ? 9 : 14;
+    const evade = tg.evadeT > 0 ? 1.7 : 1;
+    const lat = U.clamp(P.lat * evade * Math.sin(tg.age * P.latW * evade + P.ph), -wide, wide);
+    let y = p.y + P.alt + P.altA * Math.sin(tg.age * P.altW + P.ph2) * evade;
+    const x = p.x + sx * lat, z = p.z + sz * lat;
+    y = U.clamp(y, S.T.terrain(x, z) + 3, S.T.ceiling - 4);
+    return { x: x, y: y, z: z, yaw: U.yawTo(p.tx, p.tz) };
   }
 
-  function rankPlaces(S) {
-    S.racers.forEach(function (r) { r.prog = progress(S, r); });
-    // Players who left go last; their drone flies on by itself but isn't placed.
-    const order = S.racers.slice().sort(function (a, b) {
-      if (a.left !== b.left) return a.left ? 1 : -1;
-      if (a.finished !== b.finished) return a.finished ? -1 : 1;
-      if (a.finished) return a.finishT - b.finishT;
-      return b.prog - a.prog;
-    });
-    order.forEach(function (r, i) { r.place = i + 1; });
-    return order;
+  function spawn(S, s) {
+    if (S.next >= S.pack.length) return;
+    const P = S.pack[S.next++];
+    const tg = { id: S.nextId++, spec: P, s: s + P.gap, hp: P.hp, age: 0, evadeT: 0, behindT: 0, flash: 0,
+      fireT: 1.2 + P.fireI * S.rand(), x: 0, y: 0, z: 0, yaw: 0, px: 0, py: 0, pz: 0, bank: 0 };
+    const q = targetPos(S, tg, tg.s);
+    tg.x = tg.px = q.x; tg.y = tg.py = q.y; tg.z = tg.pz = q.z; tg.yaw = q.yaw;
+    S.targets.push(tg);
   }
 
-  // ------------------------------------------------------------------ bots
-  function botInput(S, r, dt) {
-    const T = S.T, g = T.gates[r.gate], g2 = T.gates[(r.gate + 1) % T.gates.length];
-    let ax = g.x + g.sx * r.botOff, ay = g.y, az = g.z + g.sz * r.botOff;
-    const dg = Math.hypot(ax - r.x, az - r.z);
-    // Nearly through: start turning for the one after, as long as we're lined up.
-    const along = (r.x - g.x) * g.nx + (r.z - g.z) * g.nz;
-    if (dg < 14 && along > -6) {
-      const k = U.clamp((14 - dg) / 14, 0, 0.6);
-      ax = U.lerp(ax, g2.x, k); ay = U.lerp(ay, g2.y, k); az = U.lerp(az, g2.z, k);
+  function stepTargets(S, me, dt) {
+    const T = S.T, hunt = S.phase() === "hunt";
+    // Keep the pack topped up, spread out ahead of you.
+    while (S.targets.length < CFG.alive && S.next < S.pack.length) {
+      let far = me.s + CFG.spawnAhead;
+      S.targets.forEach(function (t) { const a = T.ahead(me.s, t.s); if (a > 0 && a + 30 > far - me.s) far = me.s + a + 30; });
+      spawn(S, far);
     }
-    const diff = U.wrap(U.yawTo(ax - r.x, az - r.z) - r.yaw);
-    const inp = {
-      steer: U.clamp(diff * 2.2, -1, 1),
-      climb: U.clamp((ay - r.y) * 0.4 - r.vy * 0.06, -1, 1),
-      brake: Math.abs(diff) > 1.0 && r.speed > 20
-    };
-    if (r.item && !r.finished) {
-      r.itemT += dt;
-      if (r.itemT > r.useDelay) {
-        // Darts only with someone to aim at.
-        if (ITEMS[r.item] !== "dart" || r.place > 1) r.useReq = true;
+    if (!hunt) return;
+    const alive = me.downT <= 0;
+    S.targets = S.targets.filter(function (tg) {
+      const P = tg.spec;
+      tg.age += dt;
+      tg.flash = Math.max(0, tg.flash - dt);
+      const d = Math.hypot(tg.x - me.x, tg.y - me.y, tg.z - me.z);
+      if (alive && d < CFG.evadeR) tg.evadeT = 1.4;
+      tg.evadeT = Math.max(0, tg.evadeT - dt);
+      // How far ahead of you along the line: too far and it waits, overtaken and it gives up.
+      const lead = T.ahead(me.s, tg.s);
+      let spd = P.spd * (tg.evadeT > 0 ? 1.3 : 1);
+      if (lead > 200) spd *= 0.5; else if (lead > 140) spd *= 0.8;
+      tg.s += spd * dt;
+      tg.behindT = lead < -CFG.escapeBehind ? tg.behindT + dt : 0;
+      if (tg.behindT > CFG.escapeAfter) { S.escaped++; S.events.push({ k: "esc", id: tg.id }); return false; }
+      tg.px = tg.x; tg.py = tg.y; tg.pz = tg.z;
+      const q = targetPos(S, tg, tg.s);
+      tg.bank = U.clamp((U.wrap(q.yaw - tg.yaw) / Math.max(dt, 1e-3)) * 0.3, -0.7, 0.7);
+      tg.x = q.x; tg.y = q.y; tg.z = q.z; tg.yaw = q.yaw;
+      // Fire back at you: aimed a little ahead of where you're going, with some spread.
+      tg.fireT -= dt;
+      if (tg.fireT <= 0) {
+        tg.fireT = P.fireI * (0.8 + S.rand() * 0.4);
+        if (alive && d < CFG.fireRange && d > 6) {
+          const lt = d / CFG.boltSpeed * 0.75;
+          const ax = me.x + U.fwdX(me.yaw) * me.speed * lt + (S.rand() - 0.5) * 4;
+          const ay = me.y + me.vy * lt + (S.rand() - 0.5) * 2.5;
+          const az = me.z + U.fwdZ(me.yaw) * me.speed * lt + (S.rand() - 0.5) * 4;
+          const dx = ax - tg.x, dy = ay - tg.y, dz = az - tg.z, l = Math.hypot(dx, dy, dz) || 1;
+          S.bolts.push({ id: S.nextId++, x: tg.x, y: tg.y, z: tg.z, px: tg.x, py: tg.y, pz: tg.z,
+            vx: dx / l * CFG.boltSpeed, vy: dy / l * CFG.boltSpeed, vz: dz / l * CFG.boltSpeed,
+            life: CFG.boltLife, dmg: P.ace ? CFG.aceDmg : CFG.boltDmg });
+          S.events.push({ k: "efire", id: tg.id, x: tg.x, y: tg.y, z: tg.z });
+        }
       }
-    }
-    return inp;
-  }
-
-  // Bots well ahead of every human ease off a little, bots far behind catch up a
-  // little; humans are never slowed.
-  function rubberBand(S) {
-    let best = -1;
-    S.racers.forEach(function (r) { if (!r.bot && !r.left && !r.finished) best = Math.max(best, r.prog); });
-    if (best < 0) { S.racers.forEach(function (r) { r.rubber = 1; }); return; }
-    S.racers.forEach(function (r) {
-      if (!r.bot) return;
-      const gap = r.prog - best;
-      r.rubber = gap > 3 ? 0.93 : gap < -4 ? 1.06 : 1;
-    });
-  }
-
-  // ------------------------------------------------------------------ pickups
-  function rollItem(S, r) {
-    const n = S.racers.length, f = n > 1 ? (r.place - 1) / (n - 1) : 0.5;
-    // weights: turbo, dart, shield, emp, smoke
-    const w = f < 0.34 ? [10, 20, 35, 5, 30] : f < 0.67 ? [25, 30, 15, 20, 10] : [40, 25, 10, 25, 0];
-    let x = S.rand() * w.reduce(function (a, b) { return a + b; }, 0);
-    for (let i = 0; i < w.length; i++) { x -= w[i]; if (x < 0) return i + 1; }
-    return 1;
-  }
-
-  function pickups(S, dt) {
-    S.boxes.forEach(function (b, bi) {
-      if (!b.on) { b.respawn -= dt; if (b.respawn <= 0) b.on = true; return; }
-      for (let i = 0; i < S.racers.length; i++) {
-        const r = S.racers[i];
-        if (r.finished || r.left) continue;
-        if (Math.abs(r.x - b.x) > CFG.boxR || Math.abs(r.z - b.z) > CFG.boxR || Math.abs(r.y - b.y) > CFG.boxR) continue;
-        b.on = false; b.respawn = CFG.boxRespawn;
-        if (!r.item) {
-          r.item = rollItem(S, r); r.itemT = 0; r.useDelay = 0.8 + S.rand() * 2.5;
-          S.events.push({ k: "pick", p: r.id, it: r.item, b: bi });
-        } else S.events.push({ k: "box", p: r.id, b: bi });
-        break;
-      }
+      return true;
     });
   }
 
-  function racerAhead(S, r) {
-    for (let i = 0; i < S.racers.length; i++) {
-      const o = S.racers[i];
-      if (o !== r && o.place === r.place - 1 && !o.finished && !o.left) return o;
-    }
-    return null;
+  // Closest approach of segment a->b to point p, squared.
+  function segDist2(ax, ay, az, bx, by, bz, px, py, pz) {
+    const vx = bx - ax, vy = by - ay, vz = bz - az;
+    const l2 = vx * vx + vy * vy + vz * vz || 1e-9;
+    const u = U.clamp(((px - ax) * vx + (py - ay) * vy + (pz - az) * vz) / l2, 0, 1);
+    const dx = ax + vx * u - px, dy = ay + vy * u - py, dz = az + vz * u - pz;
+    return dx * dx + dy * dy + dz * dz;
   }
 
-  function useItem(S, r) {
-    const it = ITEMS[r.item];
-    r.useReq = false;
-    if (!it || r.finished) return;
-    r.item = 0;
-    S.events.push({ k: "use", p: r.id, it: ITEMS.indexOf(it) });
-    if (it === "turbo") r.turboT = CFG.turboT;
-    else if (it === "shield") r.shieldT = CFG.shieldT;
-    else if (it === "smoke") r.smokeT = CFG.smokeT;
-    else if (it === "emp") {
-      S.events.push({ k: "emp", p: r.id, x: U.r1(r.x), y: U.r1(r.y), z: U.r1(r.z) });
-      S.racers.forEach(function (o) {
-        if (o === r || o.finished || o.left) return;
-        if (Math.hypot(o.x - r.x, o.y - r.y, o.z - r.z) > CFG.empR) return;
-        if (o.shieldT > 0) { o.shieldT = 0; S.events.push({ k: "block", p: o.id, by: r.id }); }
-        else { o.slowT = CFG.slowT; o.ec++; S.events.push({ k: "zap", p: o.id, by: r.id }); }
-      });
-    } else if (it === "dart") {
-      const tgt = racerAhead(S, r);
-      const fx = U.fwdX(r.yaw), fz = U.fwdZ(r.yaw);
-      S.darts.push({
-        id: S.nextDart++, owner: r.id, target: tgt ? tgt.id : -1, life: CFG.dartLife,
-        x: r.x + fx * 2, y: r.y, z: r.z + fz * 2, vx: fx * CFG.dartSpeed, vy: 0, vz: fz * CFG.dartSpeed
-      });
+  // ------------------------------------------------------------------ your guns
+  function shoot(S, me, dt) {
+    me.fireCd = Math.max(0, me.fireCd - dt);
+    if (!S.input.fire || me.fireCd > 0 || me.downT > 0 || S.phase() !== "hunt") return;
+    me.fireCd = CFG.fireEvery;
+    const a = aimDir(me);
+    // Aim assist: a target close to the crosshair pulls the shot onto where it'll be.
+    let best = null, bestAng = CFG.assist;
+    S.targets.forEach(function (tg) {
+      const dx = tg.x - me.x, dy = tg.y - me.y, dz = tg.z - me.z, d = Math.hypot(dx, dy, dz);
+      if (d > CFG.assistRange || d < 1) return;
+      const ang = Math.acos(U.clamp((dx * a.x + dy * a.y + dz * a.z) / d, -1, 1));
+      if (ang < bestAng) { bestAng = ang; best = tg; }
+    });
+    let dx = a.x, dy = a.y, dz = a.z;
+    if (best) {
+      const d = Math.hypot(best.x - me.x, best.y - me.y, best.z - me.z), lt = d / CFG.shotSpeed;
+      const vx = (best.x - best.px) / Math.max(dt, 1e-3), vy = (best.y - best.py) / Math.max(dt, 1e-3), vz = (best.z - best.pz) / Math.max(dt, 1e-3);
+      dx = best.x + vx * lt - me.x; dy = best.y + vy * lt - me.y; dz = best.z + vz * lt - me.z;
+      const l = Math.hypot(dx, dy, dz) || 1; dx /= l; dy /= l; dz /= l;
     }
+    const side = (me.shotsFired % 2 ? 1 : -1) * 0.35;
+    const ox = me.x + U.fwdZ(me.yaw) * -side, oz = me.z - U.fwdX(me.yaw) * -side;
+    S.shots.push({ id: S.nextId++, x: ox, y: me.y - 0.1, z: oz, px: ox, py: me.y - 0.1, pz: oz,
+      vx: dx * CFG.shotSpeed + U.fwdX(me.yaw) * me.speed, vy: dy * CFG.shotSpeed, vz: dz * CFG.shotSpeed + U.fwdZ(me.yaw) * me.speed,
+      life: CFG.shotLife });
+    me.shotsFired++;
+    S.events.push({ k: "fire", p: me.id });
   }
 
-  function stepDarts(S, dt) {
-    S.darts = S.darts.filter(function (d) {
-      d.life -= dt;
-      const tgt = d.target >= 0 ? S.racers[d.target] : null;
-      if (tgt && !tgt.finished && !tgt.left) {
-        // Home in: turn the velocity toward the target.
-        let tx = tgt.x - d.x, ty = tgt.y - d.y, tz = tgt.z - d.z;
-        const tl = Math.hypot(tx, ty, tz) || 1;
-        tx /= tl; ty /= tl; tz /= tl;
-        const k = Math.min(1, CFG.dartTurn * dt);
-        let vx = U.lerp(d.vx / CFG.dartSpeed, tx, k), vy = U.lerp(d.vy / CFG.dartSpeed, ty, k), vz = U.lerp(d.vz / CFG.dartSpeed, tz, k);
-        const vl = Math.hypot(vx, vy, vz) || 1;
-        d.vx = vx / vl * CFG.dartSpeed; d.vy = vy / vl * CFG.dartSpeed; d.vz = vz / vl * CFG.dartSpeed;
+  function stepShots(S, me, dt) {
+    const T = S.T;
+    S.shots = S.shots.filter(function (sh) {
+      sh.life -= dt;
+      sh.px = sh.x; sh.py = sh.y; sh.pz = sh.z;
+      sh.x += sh.vx * dt; sh.y += sh.vy * dt; sh.z += sh.vz * dt;
+      if (sh.life <= 0) return false;
+      if (sh.y < T.terrain(sh.x, sh.z)) { S.events.push({ k: "spark", x: sh.x, y: sh.y, z: sh.z }); return false; }
+      for (let i = 0; i < S.targets.length; i++) {
+        const tg = S.targets[i], R = tg.spec.ace ? CFG.aceR : CFG.tR;
+        if (segDist2(sh.px, sh.py, sh.pz, sh.x, sh.y, sh.z, tg.x, tg.y, tg.z) > R * R) continue;
+        me.shotsHit++;
+        tg.hp--; tg.flash = 0.12; tg.evadeT = 1.4;
+        if (tg.hp <= 0) {
+          S.targets.splice(i, 1);
+          me.score += tg.spec.pts; me.lastKillT = S.huntT(); S.kills++;
+          S.events.push({ k: "kill", p: me.id, id: tg.id, pts: tg.spec.pts, ace: tg.spec.ace, x: tg.x, y: tg.y, z: tg.z });
+        } else S.events.push({ k: "thit", id: tg.id, x: sh.x, y: sh.y, z: sh.z });
+        return false;
       }
-      d.x += d.vx * dt; d.y += d.vy * dt; d.z += d.vz * dt;
-      if (d.life <= 0 || d.y < S.T.terrain(d.x, d.z)) return false;
-      for (let i = 0; i < S.racers.length; i++) {
-        const o = S.racers[i];
-        if (o.id === d.owner || o.finished || o.left) continue;
-        if (Math.hypot(o.x - d.x, o.y - d.y, o.z - d.z) > CFG.dartR) continue;
-        if (o.shieldT > 0) { o.shieldT = 0; S.events.push({ k: "block", p: o.id, by: d.owner }); }
-        else { o.spinT = CFG.spinT; o.hc++; S.events.push({ k: "hit", p: o.id, by: d.owner }); }
+      return true;
+    });
+    S.bolts = S.bolts.filter(function (b) {
+      b.life -= dt;
+      b.px = b.x; b.py = b.y; b.pz = b.z;
+      b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
+      if (b.life <= 0 || b.y < T.terrain(b.x, b.z)) return false;
+      if (me.downT <= 0 && segDist2(b.px, b.py, b.pz, b.x, b.y, b.z, me.x, me.y, me.z) < CFG.boltR * CFG.boltR) {
+        if (me.invulnT > 0) return false;
+        S.events.push({ k: "ouch", p: me.id, dmg: b.dmg });
+        damage(S, me, b.dmg, 0);
         return false;
       }
       return true;
     });
   }
 
-  function timers(r, dt) {
-    if (r.spinT > 0) r.spinT = Math.max(0, r.spinT - dt);
-    if (r.slowT > 0) r.slowT = Math.max(0, r.slowT - dt);
-    if (r.turboT > 0) r.turboT = Math.max(0, r.turboT - dt);
-    if (r.smokeT > 0) r.smokeT = Math.max(0, r.smokeT - dt);
-    if (r.shieldT > 0) r.shieldT = Math.max(0, r.shieldT - dt);
-  }
-
-  // Missed-gate and wrong-way warnings for the HUD (own drone only).
-  function warnings(S, r, dt) {
-    const T = S.T, g = T.gates[r.gate];
-    let ahead = r.s - g.s;
-    ahead = ((ahead % T.len) + T.len * 1.5) % T.len - T.len / 2;   // -len/2..len/2
-    r.missT = ahead > 20 && !r.finished && S.phase() === "race" ? r.missT + dt : 0;
-    const ti = Math.max(0, r.near);
-    const dot = U.fwdX(r.yaw) * T.tan[ti * 3] + U.fwdZ(r.yaw) * T.tan[ti * 3 + 2];
-    r.wrongT = dot < -0.3 && r.missT === 0 && S.phase() === "race" && !r.finished ? r.wrongT + dt : 0;
+  // ------------------------------------------------------------------ autopilot
+  // Flies a drone at the nearest target ahead and shoots when lined up. Used by
+  // ?autopilot=1 and the headless tests.
+  function botInput(S, r) {
+    const T = S.T;
+    let tg = null, bd = Infinity;
+    S.targets.forEach(function (t) {
+      const a = T.ahead(r.s, t.s);
+      const d = Math.hypot(t.x - r.x, t.y - r.y, t.z - r.z) + (a < -10 ? 400 : 0);
+      if (d < bd) { bd = d; tg = t; }
+    });
+    let ax, ay, az;
+    if (tg) { ax = tg.x; ay = tg.y; az = tg.z; }
+    else { const p = T.at(r.s + 30); ax = p.x; ay = p.y + 3; az = p.z; }
+    // Too far off the line (a corner in the city): head for the line a bit ahead instead.
+    const nb = T.nearest(r.x, r.z, r.near);
+    if (nb.d > 10) { const p = T.at(r.s + 22), k = U.clamp((nb.d - 10) / 10, 0, 0.85); ax = U.lerp(ax, p.x, k); az = U.lerp(az, p.z, k); }
+    const diff = U.wrap(U.yawTo(ax - r.x, az - r.z) - r.yaw);
+    const a = aimDir(r);
+    let fire = false;
+    if (tg) {
+      const dx = tg.x - r.x, dy = tg.y - r.y, dz = tg.z - r.z, d = Math.hypot(dx, dy, dz);
+      fire = d < 160 && (dx * a.x + dy * a.y + dz * a.z) / d > Math.cos(0.1);
+    }
+    return {
+      steer: U.clamp(diff * 2.4, -1, 1),
+      climb: U.clamp((ay - r.y) * 0.35 - r.vy * 0.06, -1, 1),
+      brake: Math.abs(diff) > 0.9 || (tg && bd < 14),
+      fire: fire
+    };
   }
 
   // ------------------------------------------------------------------ one step
-  // Host / solo: everything. Player (S.client): own drone and HUD warnings only;
-  // net.js fills in everyone else.
   function step(S, dt) {
     S.t += dt;
     const me = S.me();
-    if (S.client) {
-      if (me) {
-        fly(S, me, S.input, dt);
-        passGates(S, me);
-        timers(me, dt);
-        warnings(S, me, dt);
-      }
-      return;
-    }
-    rubberBand(S);
-    S.racers.forEach(function (r) {
-      if (r.remote) return;   // another player's drone: moved by their reports (net.js)
-      const inp = r.id === S.humanId && !r.finished ? S.input : botInput(S, r, dt);
-      fly(S, r, inp, dt);
-      passGates(S, r);
-    });
-    if (me) warnings(S, me, dt);
-    rankPlaces(S);
-    if (S.phase() === "race") {
-      if (me && S.input.use) { me.useReq = true; }
-      S.input.use = false;
-      pickups(S, dt);
-      S.racers.forEach(function (r) { if (r.useReq) useItem(S, r); });
-      stepDarts(S, dt);
-    } else S.input.use = false;
-    S.racers.forEach(function (r) { timers(r, dt); });
-    checkOver(S);
-  }
-
-  function checkOver(S) {
-    if (S.over || S.phase() !== "race") return;
-    const humans = S.racers.filter(function (r) { return !r.bot && !r.left; });
-    const allIn = humans.length > 0 && humans.every(function (r) { return r.finished; });
-    const everyone = S.racers.every(function (r) { return r.finished || r.left; });
-    if ((allIn || everyone) && !S.overAt) S.overAt = S.t + CFG.overWait;
-    const late = S.firstFinishT >= 0 && S.t - S.firstFinishT > CFG.finishWait;
-    if ((S.overAt && S.t >= S.overAt) || late || S.raceT() > CFG.maxRace || (humans.length === 0 && !S.solo)) finish(S);
+    if (!me || S.over) return;
+    fly(S, me, S.input, dt);
+    if (me.invulnT > 0) me.invulnT = Math.max(0, me.invulnT - dt);
+    if (me.hurtT > 0) me.hurtT = Math.max(0, me.hurtT - dt);
+    stepTargets(S, me, dt);
+    shoot(S, me, dt);
+    stepShots(S, me, dt);
+    if (S.phase() === "hunt" && S.huntT() >= CFG.round) finish(S);
   }
 
   function finish(S) {
-    const order = rankPlaces(S);
     S.over = true;
-    S.results = order.map(function (r) { return { id: r.id, t: r.finished ? U.r2(r.finishT) : -1 }; });
+    S.shots.length = 0; S.bolts.length = 0;
     S.events.push({ k: "over" });
+    rank(S);
   }
 
-  DR.Sim = {
-    create: create, roster: roster, step: step, fly: fly, passGates: passGates, crossesGate: crossesGate,
-    rankPlaces: rankPlaces, useItem: useItem, botInput: botInput, finish: finish
-  };
+  // Most points first; a tie goes to whoever got there first.
+  function rank(S) {
+    S.results = S.racers.slice().sort(function (a, b) {
+      if (a.left !== b.left) return a.left ? 1 : -1;
+      if (b.score !== a.score) return b.score - a.score;
+      return a.lastKillT - b.lastKillT;
+    }).map(function (r) { return { id: r.id, score: r.score }; });
+    return S.results;
+  }
+
+  DR.Sim = { create: create, roster: roster, step: step, botInput: botInput, finish: finish, rank: rank, pack: pack };
 })(globalThis.DR);

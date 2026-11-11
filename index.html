@@ -3,47 +3,64 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hop Drone Racing</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23c4f35b'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="style.css?v=1">
+<title>Hop Drone Hunt</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23ff2d4a'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
-<canvas id="view" aria-label="Race view"></canvas>
+<canvas id="view" aria-label="Game view"></canvas>
 <canvas id="static" width="160" height="90"></canvas>
-<div id="smoke"></div>
+<div id="hurt"></div>
 
 <!-- Intro: your pilot on the stand, eyes on the remote -->
 <div id="intro" hidden>
   <img id="introImg" alt="">
-  <div><div id="introName"></div><div id="introRole"></div><div id="keys"></div></div>
+  <div><div id="introName"></div><div id="introRole"></div><div id="introBrief"></div><div id="keys"></div></div>
 </div>
 
 <div id="hud" class="off">
   <div id="tl">
-    <div class="pl"><span id="place"></span><small id="placeOf"></small></div>
-    <div id="lap"></div>
-    <div id="time"></div>
-    <div id="standings"></div>
+    <div class="sc"><span id="score">0</span><small>PTS</small></div>
+    <div id="left"></div>
+    <div id="board"></div>
   </div>
-  <div id="item"><div id="itemIcon"></div><div id="itemName"></div><kbd id="itemKey"></kbd></div>
+  <div id="clock">3:00</div>
+  <div id="hp"><div id="hpBar"><div id="hpFill"></div></div><span id="hpNum">100</span></div>
   <canvas id="minimap" width="170" height="170"></canvas>
-  <div id="marker" hidden><i></i><span id="markerDist"></span></div>
+  <div id="marks"></div>
   <div id="osd" hidden>
-    <span class="cross">+</span>
     <div class="osd-l"><span id="osdBatt"></span><span id="osdAlt"></span></div>
     <div class="osd-r"><span id="osdSpeed"></span><span>FPV</span></div>
   </div>
+  <div id="incoming">INCOMING</div>
 </div>
+<div id="cross" hidden><i></i><i></i><i></i><i></i></div>
+<div id="hitmark"></div>
+<div id="pop"></div>
 <div id="center"></div>
+<div id="sub"></div>
 <div id="toast"></div>
 <div id="wait" hidden></div>
 
+<div id="menu" hidden>
+  <div class="panel">
+    <h2 id="pickTitle">PICK A COURSE</h2>
+    <div class="cards">
+      <button type="button" class="card city" data-course="city"><b>City</b><small></small></button>
+      <button type="button" class="card mountain" data-course="mountain"><b>Mountain</b><small></small></button>
+    </div>
+  </div>
+</div>
+
 <div id="results" hidden>
   <div class="panel">
-    <h2 id="resTitle">RESULTS</h2>
+    <h2><span id="resTitle">FINAL SCORES</span> <small id="resCourse"></small></h2>
     <div id="resBody"></div>
     <div class="btns">
-      <button type="button" id="again">RACE AGAIN</button>
+      <div id="resPick">
+        <button type="button" class="small" data-course="city"><b>HUNT AGAIN · City</b></button>
+        <button type="button" class="small" data-course="mountain"><b>HUNT AGAIN · Mountain</b></button>
+      </div>
       <p id="resWait" hidden></p>
       <button type="button" id="endAll" class="quiet" hidden>END GAME FOR EVERYONE</button>
       <button type="button" id="backLobby" class="quiet">BACK TO LOBBY</button>
@@ -64,13 +81,12 @@
 </script>
 <script>
 /* The game's scripts, in order. They download in parallel and each one is
-   retried if the network drops it (a dropped file would leave the game half
-   loaded); then they run in this order. hoplobby.js is an unchanged copy of
-   HopLobby SDK v1, so standalone mode also works offline. */
+   retried if the network drops it; then they run in this order. hoplobby.js is
+   an unchanged copy of HopLobby SDK v1, so standalone mode also works offline. */
 (function () {
-  var FILES = ["hoplobby.js", "vendor/three.min.js", "vendor/GLTFLoader.js", "src/util.js?v=1", "src/track.js?v=1", "src/sim.js?v=1",
-    "src/net.js?v=1", "src/world.js?v=1", "src/drone.js?v=1", "src/pilot.js?v=1", "src/view.js?v=1", "src/audio.js?v=1",
-    "src/input.js?v=1", "src/hud.js?v=1", "src/main.js?v=1"];
+  var FILES = ["hoplobby.js", "vendor/three.min.js", "vendor/GLTFLoader.js", "src/util.js?v=2", "src/track.js?v=2", "src/sim.js?v=2",
+    "src/net.js?v=2", "src/world.js?v=2", "src/drone.js?v=2", "src/pilot.js?v=2", "src/view.js?v=2", "src/audio.js?v=2",
+    "src/input.js?v=2", "src/hud.js?v=2", "src/main.js?v=2"];
   function fail(src) {
     var el = document.getElementById("err");
     el.hidden = false;
