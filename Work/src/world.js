@@ -67,26 +67,6 @@ globalThis.DR = globalThis.DR || {};
   }
 
   // ------------------------------------------------------------------ city
-  function windowTex() {
-    // 2 x 2 windows per tile, some lit; the tile repeats every 8 m on the walls.
-    const c = document.createElement("canvas");
-    c.width = c.height = 64;
-    const x = c.getContext("2d");
-    x.fillStyle = "#e9e6df"; x.fillRect(0, 0, 64, 64);
-    const rng = U.rng(5);
-    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
-      const lit = rng() < 0.35;
-      x.fillStyle = lit ? "#ffe6a8" : "#3b4a63";
-      x.fillRect(6 + i * 32, 8 + j * 32, 20, 18);
-      x.fillStyle = "rgba(255,255,255,0.25)"; x.fillRect(6 + i * 32, 8 + j * 32, 20, 4);
-    }
-    const t = new THREE.CanvasTexture(c);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.colorSpace = THREE.SRGBColorSpace;
-    t.anisotropy = 4;
-    return t;
-  }
-
   function city(group, T) {
     // Street: one big asphalt slab, with a paler avenue under the flight line.
     const E = T.extent;
@@ -97,41 +77,58 @@ globalThis.DR = globalThis.DR || {};
     group.add(ribbon(T, 19, 0x6a7182, 0.02));
     group.add(ribbon(T, 0.5, 0xf2e6b8, 0.04, 7.5));
     group.add(ribbon(T, 0.5, 0xf2e6b8, 0.04, -7.5));
-    // Towers, merged into one mesh: walls carry the window tile scaled to their size,
-    // roofs take the plain corner of it.
-    const TINT = [0x9aa6bb, 0xc3cad6, 0x7d8ba8, 0xdcc9a8, 0xa8bccc, 0xc9a48f];
-    const pos = [], nor = [], uv = [], col = [], idx = [];
-    const c = new THREE.Color();
+    // Towers. Everything is merged into a few big meshes (one per wall style, one
+    // for trim, one for billboards), so hundreds of detailed buildings stay cheap.
+    const walls = [bucket(), bucket(), bucket()], trim = bucket(), boards = bucket(), glow = bucket();
+    const TINT = [[0xffffff, 0xe8ecf4, 0xd6dde9, 0xf2e8da], [0xffffff, 0xdff1f4, 0xe6e9ff, 0xd8e6ef], [0xffffff, 0xf0ddd2, 0xe2cfc0, 0xffe9d6]];
+    const TRIM = [0xd9dde6, 0x9aa6b8, 0xe6dccb];
+    const c = new THREE.Color(), ct = new THREE.Color();
     T.buildings.forEach(function (b) {
-      const geo = new THREE.BoxGeometry(b.w, b.h, b.d);
-      const p = geo.attributes.position, n = geo.attributes.normal, u = geo.attributes.uv;
-      c.setHex(TINT[Math.floor(b.tint * TINT.length) % TINT.length]);
-      const base = pos.length / 3;
-      for (let i = 0; i < p.count; i++) {
-        pos.push(p.getX(i) + b.x, p.getY(i) + b.h / 2, p.getZ(i) + b.z);
-        const nx = n.getX(i), ny = n.getY(i);
-        nor.push(nx, ny, n.getZ(i));
-        if (Math.abs(ny) > 0.5) uv.push(0.02, 0.02);
-        else uv.push(u.getX(i) * (Math.abs(nx) > 0.5 ? b.d : b.w) / 8, u.getY(i) * b.h / 8);
-        const k = Math.abs(ny) > 0.5 ? 0.75 : 1;
-        col.push(c.r * k, c.g * k, c.b * k);
+      c.setHex(TINT[b.style][Math.floor(b.tint * 4) % 4]);
+      ct.setHex(TRIM[b.style]);
+      // Sidewalk round the block.
+      box(trim, b.x, 0.12, b.z, b.w + 6, 0.24, b.d + 6, 0xa7abb5);
+      let bottom = 0;
+      b.tiers.forEach(function (t, k) {
+        box(walls[b.style], b.x, (bottom + t.top) / 2, b.z, t.w, t.top - bottom, t.d, c, true);
+        // Cornice ledge at the top of each tier, and a parapet round the roof.
+        box(trim, b.x, t.top - 0.3, b.z, t.w + 0.9, 0.6, t.d + 0.9, ct);
+        const pw = 0.4, ph = 1.1, y = t.top + ph / 2;
+        box(trim, b.x, y, b.z - t.d / 2 + pw / 2, t.w, ph, pw, ct);
+        box(trim, b.x, y, b.z + t.d / 2 - pw / 2, t.w, ph, pw, ct);
+        box(trim, b.x - t.w / 2 + pw / 2, y, b.z, pw, ph, t.d, ct);
+        box(trim, b.x + t.w / 2 - pw / 2, y, b.z, pw, ph, t.d, ct);
+        // Corner pilasters on the base tier of office and brick towers.
+        if (k === 0 && b.style !== 1) [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(function (s) {
+          box(trim, b.x + s[0] * (t.w / 2), (bottom + t.top) / 2, b.z + s[1] * (t.d / 2), 0.9, t.top - bottom, 0.9, ct);
+        });
+        // Glass-tower fins: thin vertical mullions standing off the wall.
+        if (b.style === 1) for (let f = -2; f <= 2; f++) {
+          box(trim, b.x + f * t.w / 5, (bottom + t.top) / 2, b.z - t.d / 2 - 0.15, 0.18, t.top - bottom, 0.3, 0x6c7a90);
+          box(trim, b.x + f * t.w / 5, (bottom + t.top) / 2, b.z + t.d / 2 + 0.15, 0.18, t.top - bottom, 0.3, 0x6c7a90);
+        }
+        bottom = t.top;
+      });
+      // Street level: a shopfront band with an awning.
+      const t0 = b.tiers[0];
+      box(trim, b.x, 2.3, b.z, t0.w + 0.3, 4.6, t0.d + 0.3, 0x2b3446);
+      box(glow, b.x, 2.1, b.z, t0.w + 0.36, 2.2, t0.d + 0.36, b.tint > 0.5 ? 0xffe2a6 : 0xbfe8ff);
+      box(trim, b.x, 4.8, b.z, t0.w + 2.2, 0.25, t0.d + 2.2, [0xd94f3d, 0x2f8f6b, 0x3a64c4, 0xe0a030][b.roof]);
+      // Roof clutter.
+      const top = b.tiers[b.tiers.length - 1];
+      if (b.roof === 0 && b.style === 2) waterTower(trim, b.x + top.w * 0.2, top.top, b.z - top.d * 0.15);
+      if (b.roof === 1 || b.roof === 2) {
+        box(trim, b.x - top.w * 0.18, top.top + 1.2, b.z + top.d * 0.12, top.w * 0.3, 2.4, top.d * 0.25, 0x8a8f9c);
+        box(trim, b.x + top.w * 0.2, top.top + 0.9, b.z - top.d * 0.2, 2.2, 1.8, 2.2, 0x9aa0ad);
       }
-      const gi = geo.index.array;
-      for (let i = 0; i < gi.length; i++) idx.push(gi[i] + base);
-      geo.dispose();
-      // Roof clutter on some: an AC box or a mast with a red light.
-      if (b.style === 1) roofBox(group, b);
-      if (b.style === 2 && b.h > 60) mast(group, b);
+      if (b.h > 60 && b.roof === 3) mast(group, b.x, top.top, b.z);
+      if (b.board) billboard(boards, trim, b);
     });
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
-    geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
-    geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
-    geo.setIndex(idx);
-    const towers = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: windowTex(), vertexColors: true }));
-    towers.matrixAutoUpdate = false;
-    group.add(towers);
+    const tex = wallTextures();
+    walls.forEach(function (bk, i) { addBucket(group, bk, new THREE.MeshLambertMaterial({ map: tex[i], vertexColors: true })); });
+    addBucket(group, trim, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    addBucket(group, glow, new THREE.MeshBasicMaterial({ vertexColors: true }));
+    addBucket(group, boards, new THREE.MeshBasicMaterial({ map: adAtlas(), vertexColors: true }));
     // Streetlights along the avenue.
     const lampGeo = new THREE.CylinderGeometry(0.12, 0.18, 7, 5); lampGeo.translate(0, 3.5, 0);
     const headGeo = new THREE.BoxGeometry(1.4, 0.3, 0.5); headGeo.translate(0.5, 7, 0);
@@ -151,17 +148,174 @@ globalThis.DR = globalThis.DR || {};
     }
     group.add(lamps, heads);
   }
-  function roofBox(group, b) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(b.w * 0.35, 2.5, b.d * 0.3), lambert(0x8a8f9c));
-    m.position.set(b.x + b.w * 0.15, b.h + 1.25, b.z - b.d * 0.15);
-    group.add(m);
-  }
-  function mast(group, b) {
+  function mast(group, x, y, z) {
     const m = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.35, 12, 5), lambert(0x3a4256));
-    m.position.set(b.x, b.h + 6, b.z);
+    m.position.set(x, y + 6, z);
     const l = new THREE.Mesh(new THREE.SphereGeometry(0.5, 6, 4), new THREE.MeshBasicMaterial({ color: 0xff3b3b }));
     l.position.y = 6.2; m.add(l);
     group.add(m);
+  }
+
+  // ---- merging: many boxes into one geometry per material
+  function bucket() { return { pos: [], nor: [], uv: [], col: [], idx: [] }; }
+  const _c = new THREE.Color();
+  const BOX = new THREE.BoxGeometry(1, 1, 1);
+  // A box centred at (cx, cy, cz). wallUV: the window tile is laid out in world
+  // metres (8 m wide, 7 m tall = two floors), so it lines up across tiers.
+  function box(bk, cx, cy, cz, w, h, d, color, wallUV) {
+    const p = BOX.attributes.position, n = BOX.attributes.normal, u = BOX.attributes.uv;
+    const col = color && color.isColor ? color : _c.setHex(color);
+    const base = bk.pos.length / 3;
+    for (let i = 0; i < p.count; i++) {
+      const x = cx + p.getX(i) * w, y = cy + p.getY(i) * h, z = cz + p.getZ(i) * d;
+      const nx = n.getX(i), ny = n.getY(i), nz = n.getZ(i);
+      bk.pos.push(x, y, z); bk.nor.push(nx, ny, nz);
+      if (wallUV) {
+        if (Math.abs(ny) > 0.5) bk.uv.push(0.5, 0.985);
+        else bk.uv.push((Math.abs(nx) > 0.5 ? z * -nx : x * nz) / 8, y / 7);
+      } else bk.uv.push(u.getX(i), u.getY(i));
+      const k = ny > 0.5 ? 0.92 : ny < -0.5 ? 0.6 : 1;
+      bk.col.push(col.r * k, col.g * k, col.b * k);
+    }
+    const gi = BOX.index.array;
+    for (let i = 0; i < gi.length; i++) bk.idx.push(gi[i] + base);
+  }
+  function addBucket(group, bk, mat) {
+    if (!bk.idx.length) return;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(bk.pos, 3));
+    geo.setAttribute("normal", new THREE.Float32BufferAttribute(bk.nor, 3));
+    geo.setAttribute("uv", new THREE.Float32BufferAttribute(bk.uv, 2));
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(bk.col, 3));
+    geo.setIndex(bk.idx);
+    const m = new THREE.Mesh(geo, mat);
+    m.matrixAutoUpdate = false;
+    group.add(m);
+  }
+
+  // ---- wall textures: office (concrete + windows), glass curtain wall, brick
+  function wallTextures() {
+    const rng = U.rng(5);
+    function canvas(draw) {
+      const c = document.createElement("canvas");
+      c.width = c.height = 128;
+      draw(c.getContext("2d"));
+      const t = new THREE.CanvasTexture(c);
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.anisotropy = 8;
+      return t;
+    }
+    function glass(x, X, Y, w, h, lit, base) {
+      const g = x.createLinearGradient(0, Y, 0, Y + h);
+      if (lit) { g.addColorStop(0, "#fff1c8"); g.addColorStop(1, "#ffcf7a"); }
+      else { g.addColorStop(0, base[0]); g.addColorStop(0.55, base[1]); g.addColorStop(1, base[2]); }
+      x.fillStyle = g; x.fillRect(X, Y, w, h);
+      // A diagonal sky reflection.
+      if (!lit) { x.fillStyle = "rgba(255,255,255,0.13)"; x.beginPath(); x.moveTo(X, Y + h * 0.6); x.lineTo(X + w * 0.5, Y); x.lineTo(X + w * 0.75, Y); x.lineTo(X, Y + h); x.fill(); }
+    }
+    const office = canvas(function (x) {
+      x.fillStyle = "#e4e1da"; x.fillRect(0, 0, 128, 128);
+      for (let f = 0; f < 2; f++) for (let b = 0; b < 2; b++) {
+        const X = 8 + b * 64, Y = 12 + f * 64;
+        x.fillStyle = "#b9b5ad"; x.fillRect(X - 3, Y - 3, 54, 46);                 // recess
+        glass(x, X, Y, 48, 40, rng() < 0.3, ["#a9c4de", "#4f6a8c", "#2e4260"]);
+        x.fillStyle = "#d8d4cc"; x.fillRect(X + 23, Y, 3, 40); x.fillRect(X, Y + 18, 48, 2);   // mullions
+      }
+      for (let f = 0; f < 2; f++) { x.fillStyle = "#cfcac0"; x.fillRect(0, f * 64, 128, 6); x.fillStyle = "#f4f2ec"; x.fillRect(0, f * 64, 128, 2); }
+    });
+    const curtain = canvas(function (x) {
+      for (let f = 0; f < 4; f++) for (let b = 0; b < 4; b++) glass(x, b * 32, f * 32, 32, 32, rng() < 0.12, ["#c6e6f0", "#5e95ad", "#2c5a74"]);
+      x.fillStyle = "#3b4d60";
+      for (let i = 0; i <= 4; i++) { x.fillRect(i * 32 - 1, 0, 2, 128); x.fillRect(0, i * 32 - 1, 128, 2); }
+      x.fillStyle = "#8fa3b5"; x.fillRect(0, 0, 128, 3); x.fillRect(0, 64, 128, 3);
+    });
+    const brick = canvas(function (x) {
+      x.fillStyle = "#9c5a44"; x.fillRect(0, 0, 128, 128);
+      for (let r = 0; r < 32; r++) for (let k = 0; k < 9; k++) {
+        const v = 0.85 + rng() * 0.3;
+        x.fillStyle = "rgb(" + Math.round(170 * v) + "," + Math.round(96 * v) + "," + Math.round(74 * v) + ")";
+        x.fillRect(k * 16 - (r % 2) * 8, r * 4, 15, 3);
+      }
+      for (let f = 0; f < 2; f++) for (let b = 0; b < 3; b++) {
+        const X = 10 + b * 40, Y = 16 + f * 64;
+        x.fillStyle = "#efe7da"; x.fillRect(X - 3, Y - 3, 26, 40);                  // white frame
+        glass(x, X, Y, 20, 34, rng() < 0.35, ["#9fb6c8", "#4b5f78", "#2a3648"]);
+        x.fillStyle = "#efe7da"; x.fillRect(X + 9, Y, 2, 34); x.fillRect(X - 5, Y + 36, 30, 4);   // sash, sill
+      }
+      x.fillStyle = "#cfc4b2"; x.fillRect(0, 0, 128, 4);
+    });
+    return [office, curtain, brick];
+  }
+
+  // ---- billboards: eight made-up ads in one atlas (2 x 4 cells)
+  const ADS = [
+    ["ZAP COLA", "#ff3d5a", "#fff", "taste the buzz"], ["HOP FM 98.7", "#1d2230", "#c4f35b", "all hits, all day"],
+    ["DRONE DASH", "#3a64c4", "#ffd23f", "same-day delivery"], ["SKYLINE BANK", "#0f5c4a", "#fff", "built to last"],
+    ["NOODLE KING", "#ffb000", "#7a1f10", "open late"], ["BOLT SNEAKERS", "#111", "#ff6b5a", "go faster"],
+    ["CITY ZOO", "#5bbf63", "#fff", "now with pandas"], ["PIXEL ARCADE", "#7a3cff", "#4dffe0", "insert coin"]
+  ];
+  function adAtlas() {
+    const c = document.createElement("canvas");
+    c.width = 1024; c.height = 512;
+    const x = c.getContext("2d");
+    ADS.forEach(function (a, i) {
+      const X = (i % 2) * 512, Y = Math.floor(i / 2) * 128;
+      const g = x.createLinearGradient(X, Y, X + 512, Y + 128);
+      g.addColorStop(0, a[1]); g.addColorStop(1, shade(a[1]));
+      x.fillStyle = g; x.fillRect(X, Y, 512, 128);
+      x.fillStyle = "rgba(255,255,255,0.08)";
+      for (let s = 0; s < 6; s++) { x.beginPath(); x.arc(X + 420 + s * 6, Y + 64, 90 - s * 14, 0, Math.PI * 2); x.fill(); }
+      x.fillStyle = a[2]; x.font = "900 58px system-ui, sans-serif"; x.textBaseline = "middle";
+      x.fillText(a[0], X + 28, Y + 52, 460);
+      x.globalAlpha = 0.85; x.font = "700 24px system-ui, sans-serif"; x.fillText(a[3], X + 30, Y + 100, 440); x.globalAlpha = 1;
+    });
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 8;
+    return t;
+  }
+  function shade(hex) { const k = new THREE.Color(hex).multiplyScalar(0.55); return "#" + k.getHexString(); }
+
+  // A 12 x 3 m panel standing 0.8 m off the wall on struts, with a frame.
+  function billboard(boards, trim, b) {
+    const B = b.board, t0 = b.tiers[0];
+    const along = B.nx !== 0 ? "z" : "x";
+    const half = (B.nx !== 0 ? t0.w : t0.d) / 2;
+    const span = Math.min(12, (B.nx !== 0 ? t0.d : t0.w) - 3);
+    if (span < 6) return;
+    const H = span / 4;
+    const fx = b.x + B.nx * (half + 0.8), fz = b.z + B.nz * (half + 0.8);
+    // Frame and struts.
+    box(trim, fx - B.nx * 0.1, B.y, fz - B.nz * 0.1, along === "z" ? 0.3 : span + 0.6, H + 0.6, along === "z" ? span + 0.6 : 0.3, 0x2b2f3a);
+    [-0.35, 0.35].forEach(function (s) {
+      const ox = along === "x" ? s * span : 0, oz = along === "z" ? s * span : 0;
+      box(trim, b.x + B.nx * (half + 0.4) + ox, B.y, b.z + B.nz * (half + 0.4) + oz, B.nx ? 0.8 : 0.25, 0.25, B.nz ? 0.8 : 0.25, 0x2b2f3a);
+    });
+    // The face: a quad with the ad's cell of the atlas, facing out.
+    const u0 = (B.ad % 2) * 0.5, v1 = 1 - Math.floor(B.ad / 2) * 0.25, v0 = v1 - 0.25;
+    const base = boards.pos.length / 3;
+    const px = fx + B.nx * 0.08, pz = fz + B.nz * 0.08;
+    // Corners left-to-right as seen from outside.
+    const rx = along === "x" ? B.nz : 0, rz = along === "z" ? -B.nx : 0;
+    [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(function (q) {
+      boards.pos.push(px + rx * q[0] * span / 2, B.y + q[1] * H / 2, pz + rz * q[0] * span / 2);
+      boards.nor.push(B.nx, 0, B.nz);
+      boards.uv.push(q[0] < 0 ? u0 : u0 + 0.5, q[1] < 0 ? v0 : v1);
+      boards.col.push(1, 1, 1);
+    });
+    boards.idx.push(base, base + 1, base + 2, base, base + 2, base + 3, base, base + 2, base + 1, base, base + 3, base + 2);
+  }
+
+  // A rooftop water tower: legs, a wooden tank and a cone roof, built from boxes.
+  function waterTower(trim, x, y, z) {
+    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(function (s) { box(trim, x + s[0] * 1.3, y + 1.6, z + s[1] * 1.3, 0.25, 3.2, 0.25, 0x3a3f4a); });
+    for (let a = 0; a < 8; a++) {
+      const ang = a / 8 * Math.PI * 2;
+      box(trim, x + Math.cos(ang) * 1.7, y + 5, z + Math.sin(ang) * 1.7, 1.4, 3.6, 1.4, a % 2 ? 0x8a5a3b : 0x7a4f35);
+    }
+    box(trim, x, y + 7.1, z, 3.2, 0.6, 3.2, 0x4a4f5c);
+    box(trim, x, y + 7.8, z, 2.0, 0.8, 2.0, 0x4a4f5c);
   }
 
   // A flat strip along the line (avenue surface, lane lines).

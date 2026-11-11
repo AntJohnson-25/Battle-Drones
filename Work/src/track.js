@@ -142,9 +142,25 @@ globalThis.DR = globalThis.DR || {};
         if (Math.hypot(cx - st.x, cz - st.z) < 30 + half) continue;  // and the stand
         if (r3 < 0.08 && nb.d > 60) continue;                    // the odd empty lot / plaza
         const near = nb.d < 70;
-        const h = near ? 22 + r1 * 40 + (r2 > 0.8 ? 30 : 0) : 40 + r1 * 80;
+        const h = Math.round(near ? 22 + r1 * 40 + (r2 > 0.8 ? 30 : 0) : 40 + r1 * 80);
+        // Setbacks: taller towers step in once or twice as they rise.
+        const r4 = rng(), r5 = rng();
+        const n = h > 70 ? (r4 < 0.55 ? 3 : 2) : h > 35 ? (r4 < 0.5 ? 2 : 1) : 1;
+        const tiers = [];
+        for (let k = 0; k < n; k++) {
+          const f = n === 1 ? 1 : k === n - 1 ? 1 : (k + 1) / n * (0.75 + r5 * 0.2);
+          const s = 1 - k * 0.2;
+          tiers.push({ w: w * s, d: d * s, top: Math.round(h * f) });
+        }
+        // A billboard on the wall that faces the line, on some buildings near it.
+        let board = null;
+        if (nb.d < 90 && r3 > 0.45 && tiers[0].top > 20) {
+          const lx = T.pts[nb.i * 3] - cx, lz = T.pts[nb.i * 3 + 2] - cz;
+          const ax = Math.abs(lx) > Math.abs(lz);
+          board = { nx: ax ? Math.sign(lx) : 0, nz: ax ? 0 : Math.sign(lz), y: Math.min(tiers[0].top - 5, 10 + r5 * 16), ad: Math.floor(r4 * 8) };
+        }
         cells[iz * CN + ix] = B.length;
-        B.push({ x: cx, z: cz, w: w, d: d, h: Math.round(h), tint: r2, style: Math.floor(r3 * 4) });
+        B.push({ x: cx, z: cz, w: w, d: d, h: h, tiers: tiers, tint: r2, style: Math.floor(r3 * 3) % 3, board: board, roof: Math.floor(r5 * 4) });
       }
     }
     T.buildings = B;
@@ -154,8 +170,12 @@ globalThis.DR = globalThis.DR || {};
       if (ix < 0 || iz < 0 || ix >= CN || iz >= CN) return 0;
       const k = cells[iz * CN + ix];
       if (k < 0) return 0;
-      const b = B[k];
-      return Math.abs(x - b.x) <= b.w / 2 && Math.abs(z - b.z) <= b.d / 2 ? b.h : 0;
+      const b = B[k], dx = Math.abs(x - b.x), dz = Math.abs(z - b.z);
+      for (let i = b.tiers.length - 1; i >= 0; i--) {
+        const t = b.tiers[i];
+        if (dx <= t.w / 2 && dz <= t.d / 2) return t.top;
+      }
+      return 0;
     };
     T.extent = { x0: CX0, z0: CZ0, size: CN * BLOCK };
   }
