@@ -1,6 +1,7 @@
-// The HUD: place, lap and time, standings with HopLobby portraits, the pickup
-// slot, countdown, warnings, a marker for your next gate, the FPV goggles' OSD,
-// the minimap, the "goggles on" static, and the results. English and pt-PT.
+// The HUD: score, round clock, health, the live scoreboard with HopLobby portraits,
+// the crosshair (it locks red over a target), target brackets and an edge arrow to
+// the nearest one, hit markers, the damage flash, the FPV goggles' OSD, the minimap,
+// the "goggles on" static, the course picker and the results. English and pt-PT.
 globalThis.DR = globalThis.DR || {};
 (function (DR) {
   "use strict";
@@ -9,24 +10,26 @@ globalThis.DR = globalThis.DR || {};
 
   const STR = {
     en: {
-      lap: "LAP", go: "GO!", missed: "MISSED GATE {n}: TURN BACK", wrong: "WRONG WAY", finished: "FINISHED!",
-      waitHost: "Waiting for the host…", waitNext: "Waiting for the host to start the next race…",
-      again: "RACE AGAIN", end: "END GAME FOR EVERYONE", back: "BACK TO LOBBY", dnf: "DNF", left: "left",
-      pilot: "PILOT", track: "Canyon Loop", laps: "{n} laps", results: "RESULTS", you: "you", watching: "Watching this race",
-      hitBy: "Hit by {name}'s dart!", blocked: "Your shield blocked it!", zapped: "Zapped by {name}'s EMP!",
-      leftRace: "{name} left the race", host: "You're the host now", use: "SPACE", lastLap: "FINAL LAP!",
-      keys: "Arrows: steer / climb · Space: pickup · Shift: brake · C: camera · M: sound · I: invert climb",
-      items: [null, "Turbo", "Homing dart", "Shield", "EMP pulse", "Smoke trail"]
+      go: "HUNT!", wrong: "WRONG WAY", pts: "PTS", left: "left", leftN: "{n} targets left", none: "Pack cleared!",
+      waitHost: "Waiting for the host to pick a course…", waitNext: "Waiting for the host to start the next round…",
+      pick: "PICK A COURSE", city: "City", mountain: "Mountain", cityD: "Weave between the towers", mountainD: "Valleys, a high col and a gorge",
+      again: "HUNT AGAIN", end: "END GAME FOR EVERYONE", back: "BACK TO LOBBY", results: "FINAL SCORES", you: "you",
+      pilot: "PILOT", brief: "3:00 · down as many target drones as you can · they shoot back",
+      leftRace: "{name} left", host: "You're the host now", down: "SHOT DOWN", respawn: "Back in {n}",
+      kill: "+1", ace: "+3 ACE!", lastMin: "1 MINUTE LEFT", last10: "", over: "TIME!", watching: "Watching",
+      keys: "Arrows / WASD: fly · Space: fire (hold) · Shift: brake · C: camera · M: sound · I: invert climb",
+      still: "still flying…"
     },
     "pt-PT": {
-      lap: "VOLTA", go: "JÁ!", missed: "FALHASTE A PORTA {n}: VOLTA ATRÁS", wrong: "SENTIDO ERRADO", finished: "TERMINASTE!",
-      waitHost: "À espera do anfitrião…", waitNext: "À espera que o anfitrião comece a próxima corrida…",
-      again: "CORRER OUTRA VEZ", end: "TERMINAR O JOGO PARA TODOS", back: "VOLTAR AO LOBBY", dnf: "N/T", left: "saiu",
-      pilot: "PILOTO", track: "Circuito do Desfiladeiro", laps: "{n} voltas", results: "RESULTADOS", you: "tu", watching: "A assistir a esta corrida",
-      hitBy: "Atingido pelo dardo de {name}!", blocked: "O teu escudo bloqueou!", zapped: "Atingido pelo EMP de {name}!",
-      leftRace: "{name} saiu da corrida", host: "Agora és o anfitrião", use: "ESPAÇO", lastLap: "ÚLTIMA VOLTA!",
-      keys: "Setas: virar / subir · Espaço: item · Shift: travar · C: câmara · M: som · I: inverter subida",
-      items: [null, "Turbo", "Dardo teleguiado", "Escudo", "Pulso EMP", "Rasto de fumo"]
+      go: "CAÇA!", wrong: "SENTIDO ERRADO", pts: "PTS", left: "saiu", leftN: "faltam {n} alvos", none: "Bando abatido!",
+      waitHost: "À espera que o anfitrião escolha o percurso…", waitNext: "À espera que o anfitrião comece a próxima ronda…",
+      pick: "ESCOLHE O PERCURSO", city: "Cidade", mountain: "Montanha", cityD: "Ziguezague entre as torres", mountainD: "Vales, um colo alto e uma garganta",
+      again: "CAÇAR OUTRA VEZ", end: "TERMINAR O JOGO PARA TODOS", back: "VOLTAR AO LOBBY", results: "PONTUAÇÃO FINAL", you: "tu",
+      pilot: "PILOTO", brief: "3:00 · abate o máximo de drones-alvo · eles disparam de volta",
+      leftRace: "{name} saiu", host: "Agora és o anfitrião", down: "ABATIDO", respawn: "De volta em {n}",
+      kill: "+1", ace: "+3 ÁS!", lastMin: "FALTA 1 MINUTO", last10: "", over: "TEMPO!", watching: "A assistir",
+      keys: "Setas / WASD: voar · Espaço: disparar · Shift: travar · C: câmara · M: som · I: inverter subida",
+      still: "ainda a voar…"
     }
   };
   function t(key, vars) {
@@ -37,26 +40,10 @@ globalThis.DR = globalThis.DR || {};
   }
   H.t = t;
 
-  const ICONS = [null,
-    '<path d="M6 30 L20 16 L6 2 M18 30 L32 16 L18 2" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linejoin="round" stroke-linecap="round"/>',
-    '<path d="M3 16 H26 M18 7 L29 16 L18 25" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="16" r="3" fill="currentColor"/>',
-    '<path d="M17 2 L30 7 V15 C30 23 24 28 17 31 C10 28 4 23 4 15 V7 Z" fill="currentColor"/>',
-    '<path d="M19 1 L6 18 H15 L12 31 L27 12 H18 Z" fill="currentColor"/>',
-    '<path d="M9 26 C3 26 2 19 7 17 C7 11 14 9 17 13 C19 8 28 9 28 15 C33 16 33 26 26 26 Z" fill="currentColor"/>'
-  ];
-  const ITEM_COL = [null, "#ffa53a", "#ff3d7f", "#6ae0ff", "#9fd0ff", "#c9ccd6"];
-  function svg(i) { return '<svg viewBox="0 0 34 33" width="100%" height="100%">' + ICONS[i] + "</svg>"; }
-
   const BLANK = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
   const $ = function (id) { return document.getElementById(id); };
   function hex(c) { return "#" + ("000000" + c.toString(16)).slice(-6); }
-  function fmt(s) {
-    if (s < 0) return "--:--.--";
-    const m = Math.floor(s / 60), r = s - m * 60;
-    return m + ":" + (r < 10 ? "0" : "") + r.toFixed(2);
-  }
-  H.fmt = fmt;
-  // Only touch the DOM when something changed.
+  function clock(s) { s = Math.max(0, Math.ceil(s)); return Math.floor(s / 60) + ":" + ("0" + (s % 60)).slice(-2); }
   function set(el, key, text, html) {
     if (H.last[key] === text) return;
     H.last[key] = text;
@@ -66,20 +53,32 @@ globalThis.DR = globalThis.DR || {};
   H.init = function (locale) {
     H.locale = STR[locale] ? locale : "en";
     $("keys").textContent = t("keys");
-    $("again").textContent = t("again");
     $("endAll").textContent = t("end");
     $("backLobby").textContent = t("back");
     $("resTitle").textContent = t("results");
+    $("pickTitle").textContent = t("pick");
+    $("resWait").textContent = t("waitNext");
+    document.querySelectorAll("[data-course]").forEach(function (b) {
+      const c = b.getAttribute("data-course");
+      b.querySelector("b").textContent = b.classList.contains("small") ? t("again") + " · " + t(c) : t(c);
+      const d = b.querySelector("small"); if (d) d.textContent = t(c + "D");
+    });
     H.staticCtx = $("static").getContext("2d");
     H.mini = $("minimap").getContext("2d");
+    // Pooled target brackets.
+    H.marks = [];
+    for (let i = 0; i < CFG.alive + 1; i++) {
+      const m = document.createElement("div"); m.className = "tmark"; m.hidden = true;
+      m.innerHTML = "<i></i><span></span>";
+      $("marks").append(m); H.marks.push(m);
+    }
   };
 
-  // Portraits: HopLobby's for players, a drawn badge for bots.
   H.portrait = function (r) {
     if (H.portraits[r.id]) return H.portraits[r.id];
     if (r.hl && typeof HopLobby !== "undefined" && HopLobby.context) {
       H.portraits[r.id] = "";
-      HopLobby.avatar(r.hl, { size: 96 }).then(function (url) { H.portraits[r.id] = url; H.last.standings = null; })
+      HopLobby.avatar(r.hl, { size: 96 }).then(function (url) { H.portraits[r.id] = url; H.last.board = null; })
         .catch(function () { H.portraits[r.id] = badge(r); });
       return "";
     }
@@ -90,9 +89,8 @@ globalThis.DR = globalThis.DR || {};
     c.width = c.height = 64;
     const x = c.getContext("2d");
     x.fillStyle = hex(r.colour); x.beginPath(); x.arc(32, 32, 30, 0, Math.PI * 2); x.fill();
-    x.fillStyle = "#1d2230";
-    if (r.bot) { x.fillRect(16, 22, 32, 22); x.fillStyle = "#fff"; x.fillRect(21, 29, 7, 7); x.fillRect(36, 29, 7, 7); }
-    else { x.font = "bold 30px system-ui"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText((r.name[0] || "?").toUpperCase(), 32, 34); }
+    x.fillStyle = "#1d2230"; x.font = "bold 30px system-ui"; x.textAlign = "center"; x.textBaseline = "middle";
+    x.fillText((r.name[0] || "?").toUpperCase(), 32, 34);
     return c.toDataURL();
   }
 
@@ -100,14 +98,19 @@ globalThis.DR = globalThis.DR || {};
     H.S = S;
     H.portraits = {};
     H.last = {};
-    H.msg = null; H.toastT = 0;
+    H.msg = null; H.hitT = 0; H.pop = null;
     $("results").hidden = true;
     $("wait").hidden = true;
+    $("menu").hidden = true;
     drawMapBase(S.T);
   };
 
-  // A message in the middle for a moment.
   H.flash = function (text, cls, secs) { H.msg = { text: text, cls: cls || "", until: performance.now() / 1000 + (secs || 1.6) }; };
+  H.hit = function (kill) { H.hitT = performance.now() / 1000; const el = $("hitmark"); el.className = kill ? "kill" : ""; el.classList.remove("on"); void el.offsetWidth; el.classList.add("on"); };
+  H.points = function (text, ace) {
+    const el = $("pop"); el.textContent = text; el.className = ace ? "ace" : "";
+    void el.offsetWidth; el.classList.add("on");
+  };
   H.toast = function (text) {
     const el = $("toast");
     el.textContent = text; el.classList.add("on");
@@ -115,13 +118,12 @@ globalThis.DR = globalThis.DR || {};
     H.toastTimer = setTimeout(function () { el.classList.remove("on"); }, 3200);
   };
   H.waiting = function (text) { const w = $("wait"); w.hidden = !text; if (text) w.textContent = text; };
+  // The course picker (host / solo) before a round.
+  H.menu = function (show) { $("menu").hidden = !show; if (show) { $("results").hidden = true; $("wait").hidden = true; } };
 
   // ------------------------------------------------------------------ minimap
   let mapBase = null, mapT = null;
-  function mapXY(x, z) {
-    const s = 150 / mapT.span;
-    return [10 + (x - mapT.x0) * s, 10 + (z - mapT.z0) * s];
-  }
+  function mapXY(x, z) { const s = 150 / mapT.span; return [10 + (x - mapT.x0) * s, 10 + (z - mapT.z0) * s]; }
   function drawMapBase(T) {
     let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
     for (let i = 0; i < T.M; i++) { const x = T.pts[i * 3], z = T.pts[i * 3 + 2]; x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
@@ -130,31 +132,33 @@ globalThis.DR = globalThis.DR || {};
     mapBase = document.createElement("canvas");
     mapBase.width = mapBase.height = 170;
     const g = mapBase.getContext("2d");
+    if (T.buildings) {
+      g.fillStyle = "rgba(150,160,180,0.35)";
+      const s = 150 / mapT.span;
+      T.buildings.forEach(function (b) { const p = mapXY(b.x - b.w / 2, b.z - b.d / 2); g.fillRect(p[0], p[1], b.w * s, b.d * s); });
+    }
     g.lineJoin = "round";
     g.beginPath();
     for (let i = 0; i <= T.M; i += 4) { const p = mapXY(T.pts[(i % T.M) * 3], T.pts[(i % T.M) * 3 + 2]); if (i) g.lineTo(p[0], p[1]); else g.moveTo(p[0], p[1]); }
     g.closePath();
     g.strokeStyle = "rgba(20,24,34,0.75)"; g.lineWidth = 9; g.stroke();
     g.strokeStyle = "#f6f5ef"; g.lineWidth = 3.5; g.stroke();
-    const s = mapXY(T.gates[0].x, T.gates[0].z);
-    g.fillStyle = "#1d2230"; g.fillRect(s[0] - 5, s[1] - 5, 10, 10);
-    g.fillStyle = "#fff"; g.fillRect(s[0] - 5, s[1] - 5, 5, 5); g.fillRect(s[0], s[1], 5, 5);
   }
   function drawMap(S, me) {
     const g = H.mini;
     g.clearRect(0, 0, 170, 170);
     g.drawImage(mapBase, 0, 0);
-    if (me && !me.finished) {
-      const ng = S.T.gates[me.gate], p = mapXY(ng.x, ng.z);
-      g.strokeStyle = "#c4f35b"; g.lineWidth = 2.5; g.beginPath(); g.arc(p[0], p[1], 6, 0, Math.PI * 2); g.stroke();
-    }
+    S.targets.forEach(function (tg) {
+      const p = mapXY(tg.x, tg.z);
+      g.fillStyle = tg.spec.ace ? "#ffc23a" : "#ff2d4a";
+      g.beginPath(); g.moveTo(p[0], p[1] - 5); g.lineTo(p[0] + 4, p[1]); g.lineTo(p[0], p[1] + 5); g.lineTo(p[0] - 4, p[1]); g.fill();
+    });
     S.racers.slice().sort(function (a, b) { return (a === me) - (b === me); }).forEach(function (r) {
-      if (r.left) return;
+      if (r.left || (r !== me && !(r.rb && r.rb.length))) return;
       const p = mapXY(r.disp.x, r.disp.z);
-      g.fillStyle = hex(r.colour);
-      g.strokeStyle = "#1d2230"; g.lineWidth = 2;
+      g.fillStyle = hex(r.colour); g.strokeStyle = "#1d2230"; g.lineWidth = 2;
       g.beginPath(); g.arc(p[0], p[1], r === me ? 6 : 4, 0, Math.PI * 2); g.fill(); g.stroke();
-      if (r === me) { g.strokeStyle = "#fff"; g.lineWidth = 2; g.beginPath(); g.arc(p[0], p[1], 9, 0, Math.PI * 2); g.stroke(); }
+      if (r === me) { g.strokeStyle = "#fff"; g.beginPath(); g.arc(p[0], p[1], 9, 0, Math.PI * 2); g.stroke(); }
     });
   }
 
@@ -165,12 +169,8 @@ globalThis.DR = globalThis.DR || {};
     H.last.st = k;
     el.style.opacity = Math.min(1, k);
     const g = H.staticCtx, img = g.createImageData(160, 90), d = img.data;
-    for (let i = 0; i < d.length; i += 4) {
-      const v = Math.random() * 255;
-      d[i] = v; d[i + 1] = v; d[i + 2] = v * 1.05; d[i + 3] = 255;
-    }
+    for (let i = 0; i < d.length; i += 4) { const v = Math.random() * 255; d[i] = v; d[i + 1] = v; d[i + 2] = v * 1.05; d[i + 3] = 255; }
     g.putImageData(img, 0, 0);
-    // A rolling band, like a weak analogue video signal.
     const y = (performance.now() / 6) % 90;
     g.fillStyle = "rgba(255,255,255,0.25)"; g.fillRect(0, y, 160, 6);
   }
@@ -179,143 +179,162 @@ globalThis.DR = globalThis.DR || {};
   H.frame = function (S, shot, net) {
     const me = S ? S.me() : null;
     const now = performance.now() / 1000;
-    const hud = $("hud");
-    const racing = !!S && (shot === "fpv" || shot === "chase" || shot === "lap" || shot === "goggles" || shot === "watch" || shot === "over");
-    hud.classList.toggle("off", !racing);
+    const flying = !!S && (shot === "fpv" || shot === "chase" || shot === "goggles" || shot === "watch" || shot === "over" || shot === "down");
+    $("hud").classList.toggle("off", !flying);
     $("intro").hidden = !(shot === "pilot" || shot === "shoulder");
     $("osd").hidden = shot !== "fpv";
+    $("cross").hidden = !(shot === "fpv" || shot === "chase") || !me || S.phase() !== "hunt";
     if (!S) { drawStatic(0); return; }
     const ph = S.phase();
 
-    // Intro card: your portrait and name, the course.
     if (me && (shot === "pilot" || shot === "shoulder")) {
       const src = H.portrait(me);
       if (H.last.introImg !== src) { $("introImg").src = src || BLANK; H.last.introImg = src; }
       set($("introName"), "introName", me.name);
-      set($("introRole"), "introRole", t("pilot") + " · " + t("track") + " · " + t("laps", { n: S.laps }));
+      set($("introRole"), "introRole", t("pilot") + " · " + t(S.T.course));
+      set($("introBrief"), "introBrief", t("brief"));
     }
 
-    // Goggles on: static as the view cuts from the pilot to the drone.
+    // Static: goggles going on, being shot down, a hard hit.
     let st = 0;
     const gs = CFG.intro - 0.85;
-    if (S.t > gs && S.t < CFG.intro + 0.35 && ph !== "race") st = S.t < CFG.intro - 0.55 ? (S.t - gs) / 0.3 : 1 - (S.t - (CFG.intro - 0.55)) / 0.9;
-    if (me && me.spinT > 0) st = Math.max(st, 0.35 * me.spinT / CFG.spinT);
-    if (me && me.slowT > 0) st = Math.max(st, 0.12 + Math.random() * 0.08);
+    if (S.t > gs && S.t < CFG.intro + 0.35 && ph !== "hunt") st = S.t < CFG.intro - 0.55 ? (S.t - gs) / 0.3 : 1 - (S.t - (CFG.intro - 0.55)) / 0.9;
+    if (me && me.downT > 0) st = Math.max(st, me.downT > CFG.downT - 0.5 ? 0.9 : 0.25);
+    if (me && me.hurtT > 0) st = Math.max(st, me.hurtT * 0.35);
     drawStatic(st);
-    $("smoke").style.opacity = DR.View.smokeOnMe ? Math.min(0.92, DR.View.smokeOnMe * 1.4).toFixed(2) : 0;
+    $("hurt").style.opacity = me && me.hurtT > 0 ? (me.hurtT * 1.6).toFixed(2) : me && me.hp < 30 && me.downT <= 0 ? (0.25 + Math.sin(now * 6) * 0.1).toFixed(2) : 0;
 
-    // Place, lap, time.
+    // Score, clock, targets left, health.
     if (me) {
-      set($("place"), "place", U.ordinal(me.place, H.locale));
-      set($("placeOf"), "placeOf", "/" + S.racers.length);
-      const lap = Math.max(1, Math.min(S.laps, me.lap));
-      set($("lap"), "lap", me.finished ? t("finished") : t("lap") + " " + lap + "/" + S.laps);
-      const rt = ph === "race" ? (me.finished ? me.finishT : S.raceT()) : 0;
-      set($("time"), "time", fmt(rt));
-    } else {
-      set($("place"), "place", ""); set($("placeOf"), "placeOf", "");
-      set($("lap"), "lap", t("watching")); set($("time"), "time", ph === "race" ? fmt(S.raceT()) : "");
+      set($("score"), "score", String(me.score));
+      const leftN = S.pack.length - S.next + S.targets.length;
+      set($("left"), "left", leftN ? t("leftN", { n: leftN }) : t("none"));
+      const hp = me.downT > 0 ? 0 : me.hp;
+      if (H.last.hp !== hp) {
+        H.last.hp = hp;
+        $("hpFill").style.width = hp + "%";
+        $("hpFill").className = hp < 30 ? "low" : hp < 60 ? "mid" : "";
+        $("hpNum").textContent = Math.ceil(hp);
+      }
     }
+    const rem = ph === "hunt" ? S.left() : ph === "over" ? 0 : CFG.round;
+    set($("clock"), "clock", clock(rem));
+    $("clock").classList.toggle("hot", ph === "hunt" && rem <= 10);
 
-    // Standings (rebuilt only when the order, or a portrait, changes).
-    const order = S.racers.slice().sort(function (a, b) { return a.place - b.place; });
-    const key = order.map(function (r) { return r.id + (r.finished ? "f" : "") + (r.left ? "l" : ""); }).join(",") + Object.keys(H.portraits).length;
-    if (H.last.standings !== key) {
-      H.last.standings = key;
-      $("standings").innerHTML = "";
-      order.forEach(function (r) {
+    // Scoreboard.
+    const order = S.racers.slice().sort(function (a, b) { return (a.left - b.left) || (b.score - a.score) || (a.lastKillT - b.lastKillT); });
+    const key = order.map(function (r) { return r.id + ":" + r.score + (r.left ? "l" : "") + (r.downT > 0 ? "d" : ""); }).join(",") + Object.keys(H.portraits).length;
+    if (H.last.board !== key) {
+      H.last.board = key;
+      const box = $("board");
+      box.innerHTML = "";
+      order.forEach(function (r, i) {
         const row = document.createElement("div");
-        row.className = "row" + (r === me ? " me" : "") + (r.left ? " gone" : "");
-        const pl = document.createElement("b"); pl.textContent = r.left ? "–" : r.place;
+        row.className = "row" + (r === me ? " me" : "") + (r.left ? " gone" : "") + (r.downT > 0 ? " dn" : "");
+        const pl = document.createElement("b"); pl.textContent = r.left ? "–" : i + 1;
         const img = document.createElement("img"); img.src = H.portrait(r) || BLANK; img.style.borderColor = hex(r.colour);
         const nm = document.createElement("span"); nm.textContent = r.name + (r.left ? " (" + t("left") + ")" : "");
-        row.append(pl, img, nm);
-        if (r.finished) { const f = document.createElement("i"); f.textContent = "🏁"; row.append(f); }
-        $("standings").append(row);
+        const sc = document.createElement("em"); sc.textContent = r.score;
+        row.append(pl, img, nm, sc);
+        box.append(row);
       });
     }
 
-    // Pickup slot.
-    const it = me ? me.item : 0;
-    const itemEl = $("item");
-    if (H.last.item !== it) {
-      H.last.item = it;
-      itemEl.classList.toggle("has", !!it);
-      $("itemIcon").innerHTML = it ? svg(it) : "";
-      $("itemIcon").style.color = it ? ITEM_COL[it] : "";
-      $("itemName").textContent = it ? STR[H.locale].items[it] || STR.en.items[it] : "";
-      $("itemKey").textContent = it ? t("use") : "";
-      if (it) { itemEl.classList.remove("pop"); void itemEl.offsetWidth; itemEl.classList.add("pop"); }
-    }
-
-    // Countdown and big messages.
+    // Big messages.
     let big = "", cls = "";
-    if (ph === "count") { const n = Math.ceil(CFG.intro + CFG.count - S.t); big = String(n); cls = "count"; }
-    else if (ph === "race" && S.raceT() < 0.8) { big = t("go"); cls = "go"; }
+    if (ph === "count") { big = String(Math.ceil(CFG.intro + CFG.count - S.t)); cls = "count"; }
+    else if (ph === "hunt" && S.huntT() < 0.8) { big = t("go"); cls = "go"; }
+    else if (me && me.downT > 0) { big = t("down"); cls = "warn"; }
     else if (H.msg && now < H.msg.until) { big = H.msg.text; cls = H.msg.cls; }
-    else if (me && me.missT > 0.6) { big = t("missed", { n: me.gate }); cls = "warn"; }
-    else if (me && me.wrongT > 0.8) { big = t("wrong"); cls = "warn"; }
+    else if (me && me.wrongT > 1.2 && ph === "hunt") { big = t("wrong"); cls = "warn"; }
     const c = $("center");
     if (H.last.big !== big + cls) { H.last.big = big + cls; c.textContent = big; c.className = cls; if (big) { c.classList.remove("pulse"); void c.offsetWidth; c.classList.add("pulse"); } }
+    set($("sub"), "sub", me && me.downT > 0 ? t("respawn", { n: Math.ceil(me.downT) }) : "");
 
-    // Next-gate marker: over the gate when it's on screen, at the edge when not.
-    const mk = $("marker");
-    if (me && !me.finished && (ph === "race" || ph === "count") && (shot === "fpv" || shot === "chase")) {
-      const g = S.T.gates[me.gate];
-      const p = DR.View.project(g.x, g.y + g.h / 2 + 1.5, g.z);
-      const dist = Math.hypot(g.x - me.disp.x, g.y - me.disp.y, g.z - me.disp.z);
-      let x = p.x, y = p.y, edge = false;
-      const m = 60;
-      if (p.behind || x < m || x > innerWidth - m || y < m || y > innerHeight - m) {
-        edge = true;
+    // Crosshair lock and target brackets.
+    let locked = false;
+    const showMarks = me && ph === "hunt" && (shot === "fpv" || shot === "chase");
+    let used = 0, nearest = null, nd = Infinity, edge = false;
+    if (showMarks) {
+      const a = DR.aimDir(me);
+      S.targets.forEach(function (tg) {
+        const dx = tg.x - me.x, dy = tg.y - me.y, dz = tg.z - me.z, d = Math.hypot(dx, dy, dz);
+        if (d < CFG.assistRange && Math.acos(U.clamp((dx * a.x + dy * a.y + dz * a.z) / d, -1, 1)) < CFG.assist) locked = true;
+        const p = DR.View.project(tg.x, tg.y, tg.z);
+        const on = !p.behind && p.x > 0 && p.x < innerWidth && p.y > 0 && p.y < innerHeight;
+        if (on && used < H.marks.length - 1) {
+          const m = H.marks[used++];
+          const size = U.clamp(1400 / Math.max(d, 1), 26, 90);
+          m.hidden = false; m.className = "tmark" + (tg.spec.ace ? " ace" : "");
+          m.style.transform = "translate(" + Math.round(p.x) + "px," + Math.round(p.y) + "px)";
+          m.style.setProperty("--s", size + "px");
+          m.lastChild.textContent = Math.round(d) + " m";
+        }
+        if (!on && d < nd) { nd = d; nearest = { tg: tg, p: p, d: d }; }
+      });
+      // None on screen: an arrow at the edge toward the nearest.
+      if (used === 0 && nearest) {
+        const m = H.marks[H.marks.length - 1], p = nearest.p;
         let nx = p.ndcX, ny = p.ndcY;
         if (p.behind) { nx = -nx; ny = -ny; }
-        const a = Math.atan2(-ny, nx);
-        const cx = innerWidth / 2, cy = innerHeight / 2;
-        const k = Math.min((cx - m) / Math.abs(Math.cos(a) || 1e-6), (cy - m) / Math.abs(Math.sin(a) || 1e-6));
-        x = cx + Math.cos(a) * k; y = cy + Math.sin(a) * k;
-        mk.style.setProperty("--rot", (a * 180 / Math.PI) + "deg");
+        const ang = Math.atan2(-ny, nx), cx = innerWidth / 2, cy = innerHeight / 2, mg = 70;
+        const k = Math.min((cx - mg) / Math.abs(Math.cos(ang) || 1e-6), (cy - mg) / Math.abs(Math.sin(ang) || 1e-6));
+        m.hidden = false; m.className = "tmark edge" + (nearest.tg.spec.ace ? " ace" : "");
+        m.style.transform = "translate(" + Math.round(cx + Math.cos(ang) * k) + "px," + Math.round(cy + Math.sin(ang) * k) + "px)";
+        m.style.setProperty("--rot", (ang * 180 / Math.PI) + "deg");
+        m.lastChild.textContent = Math.round(nearest.d) + " m";
+        edge = true;
       }
-      mk.hidden = false;
-      mk.classList.toggle("edge", edge);
-      mk.style.transform = "translate(" + Math.round(x) + "px," + Math.round(y) + "px)";
-      set($("markerDist"), "mdist", Math.round(dist) + " m");
-    } else mk.hidden = true;
+    }
+    H.marks.forEach(function (m, i) { if (!showMarks || (i >= used && !(edge && i === H.marks.length - 1))) m.hidden = true; });
+    $("cross").classList.toggle("lock", locked);
 
-    // FPV goggles' on-screen display: battery sagging over the race, signal, timer.
+    // Incoming fire close by.
+    let incoming = false;
+    if (me && me.downT <= 0) S.bolts.forEach(function (b) {
+      const dx = me.x - b.x, dy = me.y - b.y, dz = me.z - b.z, d = Math.hypot(dx, dy, dz);
+      if (d < 35 && (dx * b.vx + dy * b.vy + dz * b.vz) / (d * CFG.boltSpeed) > 0.9) incoming = true;
+    });
+    $("incoming").classList.toggle("on", incoming);
+
     if (shot === "fpv" && me) {
-      const v = 16.8 - Math.min(2.4, Math.max(0, S.raceT()) / 70) - (me.turboT > 0 ? 0.4 : 0);
+      const v = 16.8 - Math.min(2.4, Math.max(0, S.huntT()) / 75);
       set($("osdBatt"), "osdBatt", v.toFixed(1) + "V");
       set($("osdSpeed"), "osdSpeed", Math.round(me.disp.speed * 3.6) + " km/h");
-      set($("osdAlt"), "osdAlt", Math.round(me.disp.y - S.T.terrain(me.disp.x, me.disp.z)) + " m");
+      set($("osdAlt"), "osdAlt", Math.round(me.disp.y - S.T.ground(me.disp.x, me.disp.z)) + " m");
     }
 
     drawMap(S, me);
 
-    // Results.
+    // Results: live, so late final scores still slot in.
     const showRes = S.over && (shot === "results" || !me);
-    if (showRes && $("results").hidden) {
-      $("results").hidden = false;
-      const body = $("resBody");
-      body.innerHTML = "";
-      (S.results || []).forEach(function (res, i) {
-        const r = S.racers[res.id];
-        if (!r) return;
-        const row = document.createElement("div");
-        row.className = "rrow" + (r === me ? " me" : "") + (i === 0 ? " first" : "");
-        const pl = document.createElement("b"); pl.textContent = r.left ? "–" : U.ordinal(i + 1, H.locale);
-        const img = document.createElement("img"); img.src = H.portrait(r) || BLANK; img.style.borderColor = hex(r.colour);
-        const nm = document.createElement("span"); nm.textContent = r.name;
-        const tm = document.createElement("em"); tm.textContent = r.left ? t("left") : res.t >= 0 ? fmt(res.t) : t("dnf");
-        row.append(pl, img, nm, tm);
-        body.append(row);
-      });
-      const host = !net || !net.isClient();
-      $("again").hidden = !host;
-      $("endAll").hidden = !(net && net.isHost());
-      $("resWait").hidden = host;
-      $("resWait").textContent = t("waitNext");
-      $("backLobby").hidden = !!(net && net.isHost());
+    if (showRes) {
+      const res = DR.Sim.rank(S);
+      const rk = res.map(function (r) { const x = S.racers[r.id]; return r.id + ":" + r.score + (x.done || x === me ? "" : "?") + (x.left ? "l" : ""); }).join(",") + Object.keys(H.portraits).length;
+      if ($("results").hidden || H.last.res !== rk) {
+        H.last.res = rk;
+        $("results").hidden = false;
+        $("resCourse").textContent = t(S.T.course);
+        const body = $("resBody");
+        body.innerHTML = "";
+        res.forEach(function (x, i) {
+          const r = S.racers[x.id];
+          const row = document.createElement("div");
+          row.className = "rrow" + (r === me ? " me" : "") + (i === 0 && !r.left ? " first" : "");
+          const pl = document.createElement("b"); pl.textContent = r.left ? "–" : U.ordinal(i + 1, H.locale);
+          const img = document.createElement("img"); img.src = H.portrait(r) || BLANK; img.style.borderColor = hex(r.colour);
+          const nm = document.createElement("span"); nm.textContent = r.name;
+          const sc = document.createElement("em");
+          sc.textContent = r.left ? t("left") : r.score + " " + t("pts") + (r !== me && !r.done && net && net.online() ? " · " + t("still") : "");
+          row.append(pl, img, nm, sc);
+          body.append(row);
+        });
+        const host = !net || !net.isClient();
+        $("resPick").hidden = !host;
+        $("endAll").hidden = !(net && net.isHost());
+        $("resWait").hidden = host;
+        $("backLobby").hidden = !!(net && net.isHost());
+      }
     }
     if (!S.over && !$("results").hidden) $("results").hidden = true;
 

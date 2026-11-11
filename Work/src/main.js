@@ -1,11 +1,12 @@
-// Start-up and the main loop: join the lobby, build the course, fetch every
-// player's avatar while HopLobby's loading screen is up, then race. The host (or
-// a player on their own) starts each race; everyone else waits for it.
+// Start-up and the main loop: join the lobby, build both courses, fetch every
+// player's avatar while HopLobby's loading screen is up, then hunt. The host (or
+// a player on their own) picks the course and starts each round; everyone else
+// waits for it, then plays their own copy of it (see net.js).
 globalThis.DR = globalThis.DR || {};
 (function (DR) {
   "use strict";
   const STEP = 1 / 60;
-  const G = { S: null, T: null, paused: false, acc: 0, last: 0, myId: null };
+  const G = { S: null, T: {}, paused: false, acc: 0, last: 0, myId: null, course: "city" };
   const qs = new URLSearchParams(location.search);
   G.autopilot = qs.has("autopilot");
   const tick = function () { return new Promise(function (ok) { setTimeout(ok, 0); }); };
@@ -17,39 +18,44 @@ globalThis.DR = globalThis.DR || {};
     let ctx;
     try { ctx = await HopLobby.init(); } catch (e) { fatal(e.message); return; }
     G.myId = ctx.playerId;
-    HopLobby.progress(0.15, "Shaping the canyon");
+    HopLobby.progress(0.15, "Building the city");
     await tick();
-    G.T = DR.Track.build();
-    HopLobby.progress(0.45, "Setting out the gates");
+    G.T.city = DR.Track.build("city");
+    HopLobby.progress(0.3, "Raising the mountains");
     await tick();
-    DR.View.init($("view"), G.T);
+    G.T.mountain = DR.Track.build("mountain");
+    HopLobby.progress(0.45, "Arming the targets");
+    await tick();
+    DR.View.init($("view"));
+    DR.View.preview(G.T.city);
     DR.Hud.init(ctx.locale);
     DR.Hud.debug = qs.has("debug");
     $("debug").hidden = !DR.Hud.debug;
     await DR.Drone.loadCustom();
-    // Avatars take a moment each: fetch them all now, behind the loading screen.
     HopLobby.progress(0.6, "Pilots taking their places");
     const all = Promise.all((HopLobby.players || []).map(function (p) { return DR.Pilot.requestAvatar(p.id); }));
     await Promise.race([all, wait(9000)]);
     HopLobby.progress(0.95, "Charging batteries");
 
     DR.Net.init(ctx, {
-      start: function (match) {
-        const S = DR.Sim.create(G.T, match.roster, { client: true });
-        S.humanId = match.roster.findIndex(function (r) { return r.hl === G.myId && !r.bot; });
-        DR.Net.clientAttach(S);
+      start: function (m, el, sc) {
+        const me = m.roster.findIndex(function (r) { return r.hl === G.myId; });
+        const S = DR.Sim.create(G.T[m.c], m.roster, { seed: m.seed, t0: el, me: me, score: sc });
+        S.humanId = me;
+        DR.Net.attach(S);
         setRace(S);
       },
-      promoted: function () { DR.Hud.toast(DR.Hud.t("host")); },
+      promoted: function () { DR.Hud.toast(DR.Hud.t("host")); DR.Hud.last.res = null; if (!G.S) DR.Hud.menu(true); },
       left: function (name) { DR.Hud.toast(DR.Hud.t("leftRace", { name: name })); }
     });
     if (DR.Net.isClient()) DR.Hud.waiting(DR.Hud.t("waitHost"));
-    else startRace();
+    else if (G.autopilot || qs.has("course")) startRound(qs.get("course") === "mountain" ? "mountain" : "city");
+    else DR.Hud.menu(true);
 
     HopLobby.on("pause", function () { DR.Input.hold(true); if (!DR.Net.online()) G.paused = true; });
     HopLobby.on("resume", function () { DR.Input.hold(false); G.paused = false; });
     HopLobby.on("relay", function (s) { $("status").textContent = s === "open" ? "" : s === "connecting" ? "Connecting…" : "Reconnecting…"; });
-    if (ctx.standalone) $("status").textContent = "Standalone: open this from a HopLobby lobby (Dev Mode) to race other players. Bots fill the grid.";
+    if (ctx.standalone) $("status").textContent = "Standalone: open this from a HopLobby lobby (Dev Mode) to hunt with up to 8 players.";
     wireButtons();
     DR.Input.onKey = onKey;
     HopLobby.progress(1, "Ready");
@@ -61,12 +67,14 @@ globalThis.DR = globalThis.DR || {};
 
   function fatal(msg) { const el = $("err"); el.hidden = false; el.textContent = msg; }
 
-  function startRace() {
-    const roster = DR.Sim.roster(DR.Net.humans());
-    const S = DR.Sim.create(G.T, roster);
-    S.humanId = roster.findIndex(function (r) { return r.hl === G.myId; });
-    S.solo = !DR.Net.online();
-    DR.Net.hostStart(S, roster);
+  function startRound(course) {
+    if (DR.Net.isClient()) return;
+    G.course = course;
+    const m = DR.Net.newMatch(course, DR.Sim.roster(DR.Net.humans()));
+    const S = DR.Sim.create(G.T[course], m.roster, { seed: m.seed });
+    S.humanId = m.roster.findIndex(function (r) { return r.hl === G.myId; });
+    if (S.humanId < 0 && !DR.Net.online()) S.humanId = 0;
+    DR.Net.attach(S);
     setRace(S);
   }
 
@@ -75,7 +83,7 @@ globalThis.DR = globalThis.DR || {};
     DR.View.setRace(S);
     DR.Hud.setRace(S);
     DR.Hud.waiting(null);
-    G.lastCount = -1; G.missed = false;
+    G.lastCount = -1; G.lastSec = -1; G.minWarned = false;
   }
 
   // ------------------------------------------------------------------ input
@@ -85,15 +93,14 @@ globalThis.DR = globalThis.DR || {};
     if (code === "KeyC") DR.View.toggleCamera();
     else if (code === "KeyM") DR.Audio.toggle();
     else if (code === "KeyI") DR.Input.toggleInvert();
-    else if ((code === "Space" || code === "Enter" || code === "NumpadEnter") && S) {
-      if (S.over && !$("results").hidden && !DR.Net.isClient() && code !== "Space") startRace();
-      else S.input.use = true;
-    }
+    else if ((code === "Enter" || code === "NumpadEnter") && S && S.over && !$("results").hidden) startRound(G.course);
   }
   addEventListener("pointerdown", function () { DR.Audio.wake(); });
 
   function wireButtons() {
-    $("again").onclick = function () { if (!DR.Net.isClient()) startRace(); };
+    document.querySelectorAll("[data-course]").forEach(function (b) {
+      b.onclick = function () { DR.Audio.wake(); startRound(b.getAttribute("data-course")); };
+    });
     $("endAll").onclick = function () { HopLobby.endGame(); };
     $("backLobby").onclick = function () { HopLobby.exit(); };
   }
@@ -103,15 +110,10 @@ globalThis.DR = globalThis.DR || {};
     const S = G.S;
     if (!S || G.paused) return;
     DR.Input.read(S.input);
-    // ?autopilot=1 (testing and recording): the bot pilot flies your drone.
     const me = S.me();
-    if (G.autopilot && me && S.phase() === "race") {
-      const inp = DR.Sim.botInput(S, me, h);
-      S.input.steer = inp.steer; S.input.climb = inp.climb; S.input.brake = inp.brake;
-      if (me.useReq) { S.input.use = true; me.useReq = false; }
-    }
-    if (DR.Net.isClient()) DR.Net.clientStep(S, h);
-    else { DR.Sim.step(S, h); DR.Net.hostStep(S, h); }
+    if (G.autopilot && me && S.phase() === "hunt") Object.assign(S.input, DR.Sim.botInput(S, me));
+    DR.Sim.step(S, h);
+    DR.Net.step(S, h);
     react(S);
     S.events.length = 0;
   }
@@ -133,8 +135,8 @@ globalThis.DR = globalThis.DR || {};
     requestAnimationFrame(frame);
   }
 
-  // Hidden tabs get no animation frames, but the host's race must go on for
-  // everyone else: a worker timer keeps the steps coming while hidden.
+  // Hidden tabs get no animation frames, but the round clock and our reports to
+  // the others must go on: a worker timer keeps the steps coming while hidden.
   function hiddenTicker() {
     try {
       const src = "setInterval(function(){postMessage(0)},50)";
@@ -145,10 +147,9 @@ globalThis.DR = globalThis.DR || {};
         advance(Math.min(0.25, now - G.last));
         G.last = now;
       };
-    } catch (e) { /* no workers: the race pauses while hidden */ }
+    } catch (e) { /* no workers: the round pauses while hidden */ }
   }
 
-  // An avatar that arrived after the race was built replaces the stand-in figure.
   let swapT = 0;
   function swapLateAvatars(now) {
     if (!G.S || now - swapT < 1) return;
@@ -158,34 +159,28 @@ globalThis.DR = globalThis.DR || {};
       const p = DR.View.pilots[i];
       if (p && p.kind === "figure" && r.hl && st[r.hl] && st[r.hl].state === "ready") {
         DR.World.stand.root.remove(p.root);
-        const np = DR.Pilot.make(r, DR.World.stand.slots[i % 16]);
+        const np = DR.Pilot.make(r, DR.World.stand.slots[i % 8]);
         DR.World.stand.root.add(np.root);
         DR.View.pilots[i] = np;
       }
     });
   }
 
-  // ------------------------------------------------------------------ sounds and messages
+  // ------------------------------------------------------------------ sounds, effects, messages
   function react(S) {
-    const me = S.me(), H = DR.Hud, A = DR.Audio;
-    const name = function (id) { return S.racers[id] ? S.racers[id].name : ""; };
+    const me = S.me(), H = DR.Hud, A = DR.Audio, V = DR.View;
+    let fired = false;
     S.events.forEach(function (e) {
-      const mine = me && e.p === me.id;
-      if (e.k === "emp") {
-        DR.View.empAt(e.x, e.y, e.z);
-        if (me && Math.hypot(e.x - me.disp.x, e.z - me.disp.z) < 80) A.play("emp");
-      }
-      if (!mine) return;
-      if (e.k === "gate") A.play("gate");
-      else if (e.k === "lap") { A.play("lap"); if (e.l === S.laps) H.flash(H.t("lastLap"), "info", 1.8); }
-      else if (e.k === "fin") { A.play("finish"); H.flash(H.t("finished"), "go", 2.5); }
-      else if (e.k === "pick") A.play("pick");
-      else if (e.k === "box") A.play("box");
-      else if (e.k === "use" && (e.local || !DR.Net.isClient())) A.play(DR.ITEMS[e.it] || "box");
-      else if (e.k === "hit") { A.play("hit"); H.flash(H.t("hitBy", { name: name(e.by) }), "warn", 1.6); }
-      else if (e.k === "block") { A.play("block"); H.flash(H.t("blocked"), "info", 1.4); }
-      else if (e.k === "zap") { A.play("zap"); H.flash(H.t("zapped", { name: name(e.by) }), "warn", 1.6); }
-      else if (e.k === "bonk") A.play("bonk");
+      if (e.k === "fire") { if (!fired) A.play("fire"); fired = true; }
+      else if (e.k === "thit") { A.play("thit"); H.hit(false); V.spark(e.x, e.y, e.z); }
+      else if (e.k === "kill") { A.play(e.ace ? "ace" : "kill"); H.hit(true); H.points(e.ace ? H.t("ace") : H.t("kill"), e.ace); V.boom(e.x, e.y, e.z, e.ace); }
+      else if (e.k === "spark") V.spark(e.x, e.y, e.z);
+      else if (e.k === "efire") { if (me && Math.hypot(e.x - me.x, e.z - me.z) < 70) A.play("efire"); }
+      else if (e.k === "ouch") { A.play("ouch"); V.shake = 1; }
+      else if (e.k === "down") { A.play("down"); if (me) V.boom(me.x, me.y, me.z, false); }
+      else if (e.k === "respawn") A.play("respawn");
+      else if (e.k === "bonk") { A.play("bonk"); V.shake = 0.6; }
+      else if (e.k === "over") { A.play("over"); H.flash(H.t("over"), "info", 1.4); }
     });
   }
 
@@ -193,15 +188,17 @@ globalThis.DR = globalThis.DR || {};
     const S = G.S;
     if (!S) { DR.Audio.motor(false, 0, false); return; }
     const me = S.me(), ph = S.phase();
-    // Countdown beeps.
-    if (ph === "count" || (ph === "race" && S.raceT() < 0.2)) {
-      const n = ph === "race" ? 0 : Math.ceil(DR.CFG.intro + DR.CFG.count - S.t);
+    if (ph === "count" || (ph === "hunt" && S.huntT() < 0.2)) {
+      const n = ph === "hunt" ? 0 : Math.ceil(DR.CFG.intro + DR.CFG.count - S.t);
       if (n !== G.lastCount) { G.lastCount = n; DR.Audio.play(n === 0 ? "go" : "beep"); }
     }
-    if (me && me.missT > 0.6 && !G.missed) { G.missed = true; DR.Audio.play("miss"); }
-    if (me && me.missT === 0) G.missed = false;
-    const armed = !!me && (ph === "race" || (ph === "count" && S.t > DR.CFG.intro + 0.8)) && DR.View.shot !== "results";
-    DR.Audio.motor(armed, me ? me.disp.speed : 0, me && me.turboT > 0);
+    if (ph === "hunt") {
+      const left = Math.ceil(S.left());
+      if (left <= 60 && left > 55 && !G.minWarned) { G.minWarned = true; DR.Hud.flash(DR.Hud.t("lastMin"), "info", 2); DR.Audio.play("beep"); }
+      if (left <= 10 && left !== G.lastSec) { G.lastSec = left; DR.Audio.play("tick"); }
+    }
+    const armed = !!me && me.downT <= 0 && (ph === "hunt" || (ph === "count" && S.t > DR.CFG.intro + 0.8)) && DR.View.shot !== "results";
+    DR.Audio.motor(armed, me ? me.disp.speed : 0, false);
   }
 
   DR.Game = G;

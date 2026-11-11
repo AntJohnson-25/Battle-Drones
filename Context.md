@@ -7,6 +7,20 @@ and hosted on my own https address.
 
 ## Current status
 
+- **2026-11-11: VISION CHANGED (user) → "Drone Hunt".** No more racing. Up to 8 pilots, 3-minute rounds on
+  **City** (towers, streets) or **Mountain** (valley, col, gorge, snowy peaks), host picks. Each pilot chases
+  their OWN pack of 60 target drones (same seed = same pack for everyone; every 10th is a gold "ace" worth 3)
+  that flee along the course and **shoot back**. 100 HP, shot down → 3 s → respawn behind with a shield.
+  Space (hold) fires with light aim assist (crosshair goes red). Most points wins; ties → who got there first.
+  **Latency design:** everything time-critical is local; the relay only carries ghost positions + scores
+  (10/s per player). Scores are self-reported (casual). Gates, laps, pickups removed.
+  - `node tools/sim-test.js` PASS (autopilot ~47 kills/round on both courses, takes hits, respawns).
+  - `node tools/net-test.js` 17/17 PASS (8 pilots, 60 ms + 8% loss: same scores everywhere, reload keeps
+    score, leaver marked, host leaves → new host starts the next round).
+  - Headless Edge shots in `Notes/shots/hunt/` (city FPV + chase, mountain, results). Page title is now
+    "Hop Drone Hunt" (working title; folder/game id unchanged).
+  - **Not hand-played yet.** Older notes below describe the race version.
+
 - 2026-10-09: project created from the Hop Tag SDK starter.
 - 2026-10-09: **first playable build.** 3D FPV drone race on one course ("Canyon Loop", ~1.2 km,
   16 gates, 3 laps, ~40 s laps), bots fill the grid to 6, all five pickups, multiplayer with the
@@ -72,13 +86,20 @@ rights; AI-generated is fine if the tool's terms allow commercial use, and it go
 
 ## Next action
 
-**PAUSED 2026-10-09 by the user ("put a pin in it")** after the first playable build. Pick up here:
+**2026-11-11:** user hand-tests the Drone Hunt build (standalone, then 2+ profiles in Dev Mode). Tune
+difficulty (target speed/fire rate/aim assist in `CFG`, sim.js) and confirm the name. Old race list below:
 
 1. User hand-tests standalone, then in a real Dev Mode lobby (2 profiles) to see real avatars on the stand
    and holding the remote (`?debug=1`).
 2. Tune from that: flight feel, gate sizes, pickup balance, intro camera framing on real avatars.
 3. Then: touch controls (if HopLobby players use phones), a performance check with 16 players on the UHD 600,
    key art and screenshots for submission.
+
+## Waiting on me
+
+Only what needs me: play-tests, reviews, decisions, approvals. Agents add `- [ ]` items; tick them when done.
+
+- [x] User hand-tests standalone (done 2026-10-16)
 
 ## Decisions
 
