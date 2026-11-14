@@ -74,8 +74,8 @@ globalThis.DR = globalThis.DR || {};
     const base = armed ? 140 + speed * 7 + (turbo ? 120 : 0) : 0;
     motor.o1.frequency.setTargetAtTime(Math.max(40, base), t, 0.08);
     motor.o2.frequency.setTargetAtTime(Math.max(40, base * 1.505), t, 0.08);
-    motor.f.frequency.setTargetAtTime(900 + speed * 40 + (turbo ? 1500 : 0), t, 0.1);
-    motor.g.gain.setTargetAtTime(armed ? 0.028 : 0, t, 0.15);
+    motor.f.frequency.setTargetAtTime(420 + speed * 16 + (turbo ? 1500 : 0), t, 0.1);
+    motor.g.gain.setTargetAtTime(armed ? 0.011 : 0, t, 0.15);   // stealth drones: a soft, dark hum
     if (wind) {
       const k = armed ? Math.min(1, speed / 32) : 0;
       wind.g.gain.setTargetAtTime(k * k * 0.05, t, 0.2);
@@ -142,7 +142,7 @@ globalThis.DR = globalThis.DR || {};
       case "zap": tone(140, 0.4, "sawtooth", 0.15, 60); noise(0.3, 0.15, 5000, 1500); break;
       case "bonk": tone(110, 0.2, "square", 0.18, 60); break;
       case "miss": tone(300, 0.25, "square", 0.08, 200); break;
-      case "fire": { const j = Math.random(); noise(0.05, 0.1, 5200, 1800); tone(1250 + j * 220, 0.09, "sawtooth", 0.045, 240); tone(190, 0.06, "sine", 0.07, 80); break; }
+      case "fire": { const j = Math.random(); noise(0.06, 0.2, 5200, 1800); tone(1250 + j * 220, 0.1, "sawtooth", 0.085, 240); tone(190, 0.07, "sine", 0.14, 80); break; }
       case "thit": tone(2400 + Math.random() * 500, 0.045, "triangle", 0.1, 1400); noise(0.04, 0.12, 6500, 3000); break;
       case "kill": noise(0.12, 0.5, 5000, 900); noise(0.7, 0.4, 1400, 90, 0.02, "lowpass"); tone(120, 0.5, "sine", 0.3, 34); noise(0.5, 0.1, 5000, 2500, 0.15); tone(1320, 0.1, "triangle", 0.09, 0, 0.06); break;
       case "ace": noise(0.14, 0.55, 5500, 900); noise(0.95, 0.45, 1600, 70, 0.02, "lowpass"); tone(110, 0.7, "sine", 0.32, 30); [880, 1175, 1568].forEach(function (f, i) { tone(f, 0.16, "square", 0.08, 0, 0.08 + i * 0.07); }); break;
