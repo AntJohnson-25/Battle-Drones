@@ -26,6 +26,15 @@ globalThis.DR = globalThis.DR || {};
         [310, 8, -75], [295, 14, 0], [240, 22, 30], [190, 9, -5], [130, 7, 40], [145, 18, 125],
         [115, 34, 215], [50, 24, 300], [-40, 14, 325], [-75, 10, 275], [-45, 9, 230]
       ]
+    },
+    // Desert: out between the dunes, past the obelisks, round the pyramids and back by the oasis.
+    dunes: {
+      name: "dunes", ceiling: 130, boundary: 70,
+      points: [
+        [0, 10, 180], [0, 12, 60], [-30, 16, -40], [-10, 24, -140], [90, 14, -190], [190, 10, -150],
+        [250, 18, -60], [230, 26, 40], [150, 12, 90], [110, 9, 170], [160, 16, 250], [100, 22, 320],
+        [0, 12, 330], [-70, 10, 280], [-50, 9, 230]
+      ]
     }
   };
   const SAMPLES = 2400;
@@ -119,7 +128,9 @@ globalThis.DR = globalThis.DR || {};
     }
 
     T.obs = [];
-    if (C.name === "city") buildCity(T); else buildMountain(T);
+    // What you've hit when you fly into the scenery itself.
+    T.wall = C.name === "city" ? "building" : C.name === "dunes" ? "dune" : "hillside";
+    if (C.name === "city") buildCity(T); else if (C.name === "dunes") buildDunes(T); else buildMountain(T);
     T.grid.forEach(function (g) { g.y = T.ground(g.x, g.z) + 0.25; g.wy = T.ground(g.wx, g.wz); });
     T.stand.y = T.ground(T.stand.x, T.stand.z);
     indexObstacles(T);
@@ -307,6 +318,104 @@ globalThis.DR = globalThis.DR || {};
       else T.trees.push([x, h, z, 0.9 + r2 * 0.9, r3]);
     }
     T.trees.forEach(function (t) { T.obs.push({ c: 1, x: t[0], z: t[2], r: 1.5 * t[3], y0: t[1] - 1, y1: t[1] + 11 * t[3] * (0.9 + t[4] * 0.4), kind: "tree" }); });
+    T.rocks.forEach(function (r) { T.obs.push({ c: 1, x: r[0], z: r[2], r: 1.2 * r[3], y0: r[1] - 1, y1: r[1] + 1.3 * r[3], kind: "rock" }); });
+  }
+
+  // ------------------------------------------------------------------ dunes
+  // Rolling sand with the line running through the troughs, a sea of big dunes
+  // beyond, pyramids standing out of it, and obelisks, ruined columns, palms and
+  // rocks to fly round. Same height grid as the mountain.
+  function buildDunes(T) {
+    const N1 = TN + 1;
+    const H = new Float32Array(N1 * N1);
+    const near = new Float32Array(N1 * N1);
+    const kind = new Uint8Array(N1 * N1);     // 1 = pyramid stone, 2 = oasis water's edge
+    // Pyramids: only where there's room well away from the line.
+    T.pyramids = [];
+    [[120, -40, 62, 58], [-160, 120, 46, 44], [340, 150, 52, 50], [40, -330, 70, 66], [-170, -160, 42, 40], [200, 400, 48, 46]].forEach(function (p) {
+      const nb = T.nearest(p[0], p[1]);
+      if (nb.d > p[3] + 34) T.pyramids.push({ x: p[0], z: p[1], h: p[2], half: p[3] });
+    });
+    // The oasis: a hollow with a pool beside the line.
+    const oa = T.at(T.len * 0.62), ol = Math.hypot(oa.tx, oa.tz) || 1;
+    T.oasis = { x: oa.x - oa.tz / ol * 44, z: oa.z + oa.tx / ol * 44, r: 20 };
+    let hint = -1;
+    for (let iz = 0; iz < N1; iz++) {
+      for (let ix = 0; ix < N1; ix++) {
+        const x = T0X + ix * TCELL, z = T0Z + iz * TCELL, k = iz * N1 + ix;
+        const nb = T.nearest(x, z, hint);
+        hint = nb.i;
+        const ty = T.pts[nb.i * 3 + 1];
+        const under = Math.max(0, ty - 13);
+        // Dune crests: sharp ridges that wander, with ripples across them.
+        const w = Math.sin(z * 0.011 + 0.6) * 1.3 + Math.sin(x * 0.007 - z * 0.004) * 0.9;
+        const ridge = 1 - Math.abs(Math.sin(x * 0.021 + z * 0.008 + w));
+        const ridge2 = 1 - Math.abs(Math.sin(z * 0.017 - x * 0.006 + 1.7 + w * 0.6));
+        const swell = Math.sin(x * 0.006 + 0.9) * Math.cos(z * 0.0052 - 0.4) * 0.5 + 0.5;
+        const floor = under + ridge * ridge * 2.6 + ridge2 * 1.2;
+        const low = under + 5 + ridge * ridge * 15 + ridge2 * 5;
+        const sea = 14 + ridge * ridge * 30 + ridge2 * 12 + swell * 34;
+        let h = U.lerp(floor, low, U.ease((nb.d - 20) / 46));
+        h = U.lerp(h, Math.max(h, sea), U.ease((nb.d - 85) / 150));
+        const od = Math.hypot(x - T.oasis.x, z - T.oasis.z);
+        if (od < T.oasis.r * 2.2) { h = U.lerp(Math.min(h, under + 0.4), h, U.ease((od - T.oasis.r) / (T.oasis.r * 1.2))); if (od < T.oasis.r * 0.8) kind[k] = 2; }
+        T.pyramids.forEach(function (p) {
+          const e = Math.max(Math.abs(x - p.x), Math.abs(z - p.z));
+          if (e < p.half) { const ph = p.h * (1 - e / p.half) + 6; if (ph > h) { h = ph; kind[k] = 1; } }
+        });
+        H[k] = h;
+        near[k] = nb.d;
+      }
+    }
+    T.terrainGrid = { x0: T0X, z0: T0Z, size: TSIZE, cell: TCELL, n: TN, H: H, near: near, kind: kind };
+    T.terrain = function (x, z) {
+      const fx = U.clamp((x - T0X) / TCELL, 0, TN - 1e-4), fz = U.clamp((z - T0Z) / TCELL, 0, TN - 1e-4);
+      const ix = Math.floor(fx), iz = Math.floor(fz), u = fx - ix, v = fz - iz;
+      const a = H[iz * N1 + ix], b = H[iz * N1 + ix + 1], c = H[(iz + 1) * N1 + ix], d = H[(iz + 1) * N1 + ix + 1];
+      return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+    };
+    T.ground = T.terrain;
+    T.extent = { x0: T0X, z0: T0Z, size: TSIZE };
+    // Obelisks stand in pairs along the line, like gates you thread.
+    T.obelisks = [];
+    for (let i = 0; i < Math.floor(T.len / 85); i++) {
+      const a = T.at(i * 85 + 70), hl = Math.hypot(a.tx, a.tz) || 1;
+      if (Math.abs(T.ahead(T.startS, i * 85 + 70)) < 45) continue;
+      [-1, 1].forEach(function (sd) {
+        const off = 15 + ((i * 7 + (sd > 0 ? 3 : 0)) % 5) * 1.6;
+        const x = a.x - a.tz / hl * off * sd, z = a.z + a.tx / hl * off * sd;
+        if (Math.hypot(x - T.stand.x, z - T.stand.z) < 16) return;
+        const h = 15 + ((i * 5 + (sd > 0 ? 2 : 0)) % 4) * 2.5;
+        T.obelisks.push([x, T.terrain(x, z), z, h, U.yawTo(a.tx, a.tz)]);
+      });
+    }
+    // Ruined columns, palms (thick round the oasis) and rocks.
+    const rng = U.rng(404);
+    T.columns = []; T.palms = []; T.rocks = [];
+    for (let i = 0; i < 26; i++) {
+      const a = rng() * 6.28, r = T.oasis.r * (0.85 + rng() * 0.9), x = T.oasis.x + Math.cos(a) * r, z = T.oasis.z + Math.sin(a) * r;
+      const nb = T.nearest(x, z);
+      if (nb.d > 9) T.palms.push([x, T.terrain(x, z), z, 0.85 + rng() * 0.6, rng()]);
+    }
+    let th = -1;
+    for (let i = 0; i < 5000 && T.columns.length + T.palms.length + T.rocks.length < 430; i++) {
+      const x = T0X + 20 + rng() * (TSIZE - 40), z = T0Z + 20 + rng() * (TSIZE - 40);
+      const r1 = rng(), r2 = rng(), r3 = rng();
+      const nb = T.nearest(x, z, th); th = nb.i;
+      if (nb.d > 230 || nb.d < 12) continue;
+      if (Math.hypot(x - T.stand.x, z - T.stand.z) < 18) continue;
+      if (Math.abs(T.ahead(T.startS - 14, nb.s)) < 40 && nb.d < 30) continue;   // the launch area stays open
+      if (kind[Math.round((z - T0Z) / TCELL) * N1 + Math.round((x - T0X) / TCELL)]) continue;
+      if (T.pyramids.some(function (p) { return Math.max(Math.abs(x - p.x), Math.abs(z - p.z)) < p.half + 6; })) continue;
+      const h = T.terrain(x, z);
+      if (nb.d < 24 && r3 > 0.35) continue;                                       // thinner right by the line
+      if (r1 < 0.3) T.columns.push([x, h, z, 0.8 + r2 * 0.7, r3]);
+      else if (r1 < 0.5) T.palms.push([x, h, z, 0.8 + r2 * 0.6, r3]);
+      else T.rocks.push([x, h, z, 0.9 + r2 * 2.6, r3 * 6]);
+    }
+    T.obelisks.forEach(function (o) { T.obs.push({ b: 1, x: o[0], z: o[2], hx: 1.1, hz: 1.1, y0: o[1] - 1, y1: o[1] + o[3], kind: "obelisk" }); });
+    T.columns.forEach(function (c) { T.obs.push({ c: 1, x: c[0], z: c[2], r: 1.0 * c[3], y0: c[1] - 1, y1: c[1] + (4 + c[4] * 5) * c[3], kind: "column" }); });
+    T.palms.forEach(function (p) { T.obs.push({ c: 1, x: p[0], z: p[2], r: 0.7, y0: p[1] - 1, y1: p[1] + 9.5 * p[3], kind: "palm" }); });
     T.rocks.forEach(function (r) { T.obs.push({ c: 1, x: r[0], z: r[2], r: 1.2 * r[3], y0: r[1] - 1, y1: r[1] + 1.3 * r[3], kind: "rock" }); });
   }
 

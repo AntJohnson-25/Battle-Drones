@@ -28,9 +28,20 @@ globalThis.DR = globalThis.DR || {};
     sensor: 16,
     fireEvery: 1 / 7, shotSpeed: 170, shotLife: 1.05, assist: 0.11, assistRange: 175,
     // them
-    pool: 60, alive: 5, spawnAhead: 85, tHp: 3, aceHp: 7, tR: 2.1, aceR: 2.7,
+    pool: 60, alive: 6, spawnAhead: 70, tHp: 3, aceHp: 7, tR: 2.1, aceR: 2.7,
     boltSpeed: 64, boltLife: 2.4, boltDmg: 11, aceDmg: 16, fireRange: 85, boltR: 1.5,
-    evadeR: 34, escapeAfter: 6, escapeBehind: 130
+    evadeR: 34, escapeAfter: 6, escapeBehind: 130,
+    // targets barrel-roll out of the way of a shot that's about to land
+    tRollT: 0.45, tRollSide: 7.5, tRollCd: 2.8, tRollAceCd: 1.9, tRollChance: 0.6, tRollSee: 48,
+    // the boss: arrives this far into the round, comes back this long after going down
+    bossAt: 40, bossBack: 40, bossHp: 80, bossPts: 15, bossR: 4.6, bossLead: 62, bossDmg: 13, bossFire: 2.5,
+    miniEvery: 6.5, miniBatch: 3, miniMax: 6, miniR: 1.6, miniDmg: 5
+  };
+  // Who runs each course. Every one of them has red eyes.
+  const BOSS = DR.BOSS = {
+    city: { id: "ceo", name: "BIG TECH CEO" },
+    mountain: { id: "santa", name: "EVIL SANTA" },
+    dunes: { id: "pharaoh", name: "MUMMY PHARAOH" }
   };
   const COLOURS = DR.COLOURS = [0x58c4ff, 0xffd23f, 0x8affa0, 0xc792ff, 0xff9f43, 0x4dffe0, 0xff7ad9, 0xb8f05a];
 
@@ -43,9 +54,9 @@ globalThis.DR = globalThis.DR || {};
       const ace = k % 10 === 9;
       out.push({
         k: k, ace: ace, hp: ace ? CFG.aceHp : CFG.tHp, pts: ace ? 3 : 1,
-        spd: (ace ? 25 : 20) + r() * 5, lat: 3 + r() * 6, latW: 0.45 + r() * 0.6, ph: r() * 6.28,
+        spd: (ace ? 28 : 23.5) + r() * 5, lat: 3 + r() * 6, latW: 0.45 + r() * 0.6, ph: r() * 6.28,
         alt: 1 + r() * 6, altA: 2 + r() * 3.5, altW: 0.35 + r() * 0.5, ph2: r() * 6.28,
-        gap: r() * 55, fireI: (ace ? 1.3 : 1.9) + r() * 1.4
+        gap: r() * 45, fireI: (ace ? 1.15 : 1.6) + r() * 1.3
       });
     }
     return out;
@@ -59,6 +70,7 @@ globalThis.DR = globalThis.DR || {};
       T: T, t: opts.t0 || 0, seed: seed, humanId: -1, racers: [],
       pack: pack(seed), next: 0, targets: [], shots: [], bolts: [], nextId: 1,
       events: [], over: false, results: null, kills: 0, escaped: 0,
+      boss: null, bossT: CFG.bossAt, bossKills: 0, bossSeen: 0, minis: 0,
       input: { steer: 0, climb: 0, brake: false, fire: false, trick: null },
       rand: U.rng((seed * 7919 + 17) >>> 0)
     };
@@ -136,7 +148,7 @@ globalThis.DR = globalThis.DR || {};
     if (ground + CFG.clearance > ny) {
       if (ground - ground0 > 1.8 && ground + CFG.clearance - ny > 1.5) {
         // Flew into a wall or a hillside: bounce off it, and it hurts more the faster you were going.
-        crash(S, r, T.course === "city" ? "building" : "hillside", r.speed + Math.abs(r.sideV), false);
+        crash(S, r, T.wall, r.speed + Math.abs(r.sideV), false);
         nx = r.x; nz = r.z; r.speed *= 0.35; r.sideV = 0;
       } else if (r.vy < -CFG.landHard && ht > 0.5) crash(S, r, "ground", -r.vy, true);
       ny = Math.max(ny, T.terrain(nx, nz) + CFG.clearance);
@@ -160,7 +172,7 @@ globalThis.DR = globalThis.DR || {};
       const o = T.hit(px, py, pz, 1.0);
       if (o) { r.warn = d; r.warnKind = o.kind; break; }
       const tg = T.terrain(px, pz);
-      if (tg > py - 0.6) { r.warn = d; r.warnKind = tg - T.ground(px, pz) > 2 ? "building" : T.course === "city" ? "ground" : "hillside"; break; }
+      if (tg > py - 0.6) { r.warn = d; r.warnKind = tg - T.ground(px, pz) > 2 ? "building" : T.course === "city" ? "ground" : T.wall; break; }
     }
     const nb = T.nearest(nx, nz, r.near);
     r.near = nb.i; r.s = nb.s;
@@ -230,33 +242,89 @@ globalThis.DR = globalThis.DR || {};
     const hl = Math.hypot(p.tx, p.tz) || 1, sx = -p.tz / hl, sz = p.tx / hl;
     const wide = T.course === "city" ? 9 : 14;
     const evade = tg.evadeT > 0 ? 1.7 : 1;
-    const lat = U.clamp(P.lat * evade * Math.sin(tg.age * P.latW * evade + P.ph), -wide, wide);
+    const lat = U.clamp(P.lat * evade * Math.sin(tg.age * P.latW * evade + P.ph) + tg.off, -wide, wide);
     let y = p.y + P.alt + P.altA * Math.sin(tg.age * P.altW + P.ph2) * evade;
     const x = p.x + sx * lat, z = p.z + sz * lat;
     y = U.clamp(y, S.T.terrain(x, z) + 3, S.T.ceiling - 4);
     return { x: x, y: y, z: z, yaw: U.yawTo(p.tx, p.tz) };
   }
 
-  function spawn(S, s) {
-    if (S.next >= S.pack.length) return;
-    const P = S.pack[S.next++];
-    const tg = { id: S.nextId++, spec: P, s: s + P.gap, hp: P.hp, age: 0, evadeT: 0, behindT: 0, flash: 0,
-      fireT: 1.2 + P.fireI * S.rand(), x: 0, y: 0, z: 0, yaw: 0, px: 0, py: 0, pz: 0, bank: 0 };
+  function add(S, P, s, fireT) {
+    const tg = { id: S.nextId++, spec: P, s: s, hp: P.hp, age: 0, evadeT: 0, behindT: 0, flash: 0,
+      fireT: fireT, x: 0, y: 0, z: 0, yaw: 0, px: 0, py: 0, pz: 0, bank: 0,
+      off: 0, rollT: 0, rollDir: 0, rollCd: 0, spin: 0, miniT: 3, burst: 0 };
     const q = targetPos(S, tg, tg.s);
     tg.x = tg.px = q.x; tg.y = tg.py = q.y; tg.z = tg.pz = q.z; tg.yaw = q.yaw;
     S.targets.push(tg);
+    return tg;
+  }
+  function spawn(S, s) {
+    if (S.next >= S.pack.length) return;
+    const P = S.pack[S.next++];
+    add(S, P, s + P.gap, 0.5 + P.fireI * S.rand());
+  }
+  function targetR(P) { return P.boss ? CFG.bossR : P.mini ? CFG.miniR : P.ace ? CFG.aceR : CFG.tR; }
+  DR.targetR = targetR;
+
+  // The boss turns up ahead of you with a pack of pests in tow.
+  function spawnBoss(S, me) {
+    const B = BOSS[S.T.course] || BOSS.city;
+    const P = { boss: true, who: B.id, name: B.name, hp: CFG.bossHp, pts: CFG.bossPts, spd: CFG.cruise,
+      lat: 6, latW: 0.55, ph: S.rand() * 6.28, alt: 7, altA: 3, altW: 0.5, ph2: S.rand() * 6.28, gap: 0, fireI: CFG.bossFire };
+    S.boss = add(S, P, me.s + 110, 2);
+    S.bossSeen++;
+    S.events.push({ k: "boss", name: B.name, who: B.id });
+  }
+  function spawnMini(S, boss, n) {
+    const r = S.rand;
+    const P = { mini: true, who: boss.spec.who, hp: 1, pts: 1, spd: CFG.cruise, lead: 26 + n * 9 + r() * 6,
+      lat: 5 + r() * 5, latW: 1.1 + r() * 0.9, ph: r() * 6.28, alt: 2 + r() * 5, altA: 2.2, altW: 0.9 + r() * 0.8, ph2: r() * 6.28,
+      gap: 0, fireI: 2.1 + r() * 1.2 };
+    const m = add(S, P, boss.s - 4, 1 + r());
+    S.minis++;
+    S.events.push({ k: "mini", id: m.id, x: boss.x, y: boss.y, z: boss.z });
+  }
+
+  // One bolt from a target at where you'll be, with some spread.
+  function fireBolt(S, tg, me, d, dmg, spread) {
+    const lt = d / CFG.boltSpeed * 0.75;
+    const ax = me.x + U.fwdX(me.yaw) * me.speed * lt + (S.rand() - 0.5) * 4 * spread;
+    const ay = me.y + me.vy * lt + (S.rand() - 0.5) * 2.5 * spread;
+    const az = me.z + U.fwdZ(me.yaw) * me.speed * lt + (S.rand() - 0.5) * 4 * spread;
+    const dx = ax - tg.x, dy = ay - tg.y, dz = az - tg.z, l = Math.hypot(dx, dy, dz) || 1;
+    S.bolts.push({ id: S.nextId++, x: tg.x, y: tg.y, z: tg.z, px: tg.x, py: tg.y, pz: tg.z,
+      vx: dx / l * CFG.boltSpeed, vy: dy / l * CFG.boltSpeed, vz: dz / l * CFG.boltSpeed,
+      life: CFG.boltLife, dmg: dmg });
+    S.events.push({ k: "efire", id: tg.id, x: tg.x, y: tg.y, z: tg.z });
+  }
+
+  // Is one of your shots about to land on this target? (Then it rolls away.)
+  function threatened(S, tg) {
+    for (let i = 0; i < S.shots.length; i++) {
+      const sh = S.shots[i];
+      const dx = tg.x - sh.x, dy = tg.y - sh.y, dz = tg.z - sh.z, d = Math.hypot(dx, dy, dz);
+      if (d > CFG.tRollSee || d < 1) continue;
+      const v = Math.hypot(sh.vx, sh.vy, sh.vz) || 1;
+      if ((dx * sh.vx + dy * sh.vy + dz * sh.vz) / (d * v) > 0.985) return sh;
+    }
+    return null;
   }
 
   function stepTargets(S, me, dt) {
     const T = S.T, hunt = S.phase() === "hunt";
-    // Keep the pack topped up, spread out ahead of you.
-    while (S.targets.length < CFG.alive && S.next < S.pack.length) {
+    // Keep the pack topped up, spread out ahead of you (the boss and his pests don't count).
+    let pack = 0;
+    S.targets.forEach(function (t) { if (!t.spec.boss && !t.spec.mini) pack++; });
+    while (pack < CFG.alive && S.next < S.pack.length) {
       let far = me.s + CFG.spawnAhead;
-      S.targets.forEach(function (t) { const a = T.ahead(me.s, t.s); if (a > 0 && a + 30 > far - me.s) far = me.s + a + 30; });
+      S.targets.forEach(function (t) { const a = T.ahead(me.s, t.s); if (a > 0 && a + 26 > far - me.s) far = me.s + a + 26; });
       spawn(S, far);
+      pack++;
     }
     if (!hunt) return;
     const alive = me.downT <= 0;
+    if (!S.boss && S.huntT() >= S.bossT && S.left() > 12) spawnBoss(S, me);
+    const born = [];
     S.targets = S.targets.filter(function (tg) {
       const P = tg.spec;
       tg.age += dt;
@@ -266,11 +334,42 @@ globalThis.DR = globalThis.DR || {};
       tg.evadeT = Math.max(0, tg.evadeT - dt);
       // How far ahead of you along the line: too far and it waits, overtaken and it gives up.
       const lead = T.ahead(me.s, tg.s);
-      let spd = P.spd * (tg.evadeT > 0 ? 1.3 : 1);
-      if (lead > 200) spd *= 0.5; else if (lead > 140) spd *= 0.8;
+      let spd;
+      if (P.boss || P.mini) {
+        // The boss and his pests hold station ahead of you instead of running.
+        spd = U.clamp(me.speed + ((P.boss ? CFG.bossLead : P.lead) - lead) * 0.6, 8, 46);
+      } else {
+        spd = P.spd * (tg.evadeT > 0 ? 1.2 : 1);
+        if (lead > 200) spd *= 0.5; else if (lead > 140) spd *= 0.8;
+      }
       tg.s += spd * dt;
       tg.behindT = lead < -CFG.escapeBehind ? tg.behindT + dt : 0;
-      if (tg.behindT > CFG.escapeAfter) { S.escaped++; S.events.push({ k: "esc", id: tg.id }); return false; }
+      if (!P.boss && tg.behindT > CFG.escapeAfter) { if (!P.mini) S.escaped++; S.events.push({ k: "esc", id: tg.id }); return false; }
+      // Barrel roll: thrown sideways out of the line of fire, then drifting back.
+      tg.rollCd = Math.max(0, tg.rollCd - dt);
+      if (tg.rollT > 0) {
+        tg.rollT = Math.max(0, tg.rollT - dt);
+        const u = 1 - tg.rollT / CFG.tRollT;
+        tg.spin = tg.rollDir * Math.PI * 2 * U.ease(u);
+        tg.off = U.approach(tg.off, tg.rollDir * CFG.tRollSide, CFG.tRollSide / CFG.tRollT * 1.25 * dt);
+        if (tg.rollT <= 0) tg.spin = 0;
+      } else {
+        tg.off = U.approach(tg.off, 0, 2.2 * dt);
+        if (!P.boss && !P.mini && tg.rollCd <= 0) {
+          const sh = threatened(S, tg);
+          if (sh) {
+            if (S.rand() < CFG.tRollChance) {
+              // Away from the side the shot is coming in on.
+              const hl = Math.hypot(sh.vx, sh.vz) || 1, side = (tg.x - sh.x) * (-sh.vz / hl) + (tg.z - sh.z) * (sh.vx / hl);
+              const p = T.at(tg.s), tl = Math.hypot(p.tx, p.tz) || 1;
+              const lineSide = (-p.tz / tl) * (-sh.vz / hl) + (p.tx / tl) * (sh.vx / hl);   // does +lateral mean the shot's right?
+              tg.rollDir = (side >= 0 ? 1 : -1) * (lineSide >= 0 ? 1 : -1);
+              tg.rollT = CFG.tRollT; tg.rollCd = P.ace ? CFG.tRollAceCd : CFG.tRollCd;
+              S.events.push({ k: "troll", id: tg.id });
+            } else tg.rollCd = 0.7;
+          }
+        }
+      }
       tg.px = tg.x; tg.py = tg.y; tg.pz = tg.z;
       const q = targetPos(S, tg, tg.s);
       tg.bank = U.clamp((U.wrap(q.yaw - tg.yaw) / Math.max(dt, 1e-3)) * 0.3, -0.7, 0.7);
@@ -278,20 +377,28 @@ globalThis.DR = globalThis.DR || {};
       // Fire back at you: aimed a little ahead of where you're going, with some spread.
       tg.fireT -= dt;
       if (tg.fireT <= 0) {
-        tg.fireT = P.fireI * (0.8 + S.rand() * 0.4);
-        if (alive && d < CFG.fireRange && d > 6) {
-          const lt = d / CFG.boltSpeed * 0.75;
-          const ax = me.x + U.fwdX(me.yaw) * me.speed * lt + (S.rand() - 0.5) * 4;
-          const ay = me.y + me.vy * lt + (S.rand() - 0.5) * 2.5;
-          const az = me.z + U.fwdZ(me.yaw) * me.speed * lt + (S.rand() - 0.5) * 4;
-          const dx = ax - tg.x, dy = ay - tg.y, dz = az - tg.z, l = Math.hypot(dx, dy, dz) || 1;
-          S.bolts.push({ id: S.nextId++, x: tg.x, y: tg.y, z: tg.z, px: tg.x, py: tg.y, pz: tg.z,
-            vx: dx / l * CFG.boltSpeed, vy: dy / l * CFG.boltSpeed, vz: dz / l * CFG.boltSpeed,
-            life: CFG.boltLife, dmg: P.ace ? CFG.aceDmg : CFG.boltDmg });
-          S.events.push({ k: "efire", id: tg.id, x: tg.x, y: tg.y, z: tg.z });
+        const can = alive && d < CFG.fireRange + (P.boss ? 25 : 0) && d > 6;
+        if (P.boss) {
+          // A burst of three.
+          tg.burst = tg.burst > 0 ? tg.burst - 1 : 2;
+          tg.fireT = tg.burst > 0 ? 0.16 : P.fireI * (0.8 + S.rand() * 0.4);
+          if (can) fireBolt(S, tg, me, d, CFG.bossDmg, 1.5);
+        } else {
+          tg.fireT = P.fireI * (0.8 + S.rand() * 0.4);
+          if (can) fireBolt(S, tg, me, d, P.mini ? CFG.miniDmg : P.ace ? CFG.aceDmg : CFG.boltDmg, P.mini ? 1.6 : 1);
         }
       }
+      // The boss lets his pests loose, a few at a time.
+      if (P.boss) {
+        tg.miniT -= dt;
+        if (tg.miniT <= 0) { tg.miniT = CFG.miniEvery; born.push(tg); }
+      }
       return true;
+    });
+    born.forEach(function (boss) {
+      let have = 0;
+      S.targets.forEach(function (t) { if (t.spec.mini) have++; });
+      for (let n = 0; n < CFG.miniBatch && have < CFG.miniMax; n++, have++) spawnMini(S, boss, have);
     });
   }
 
@@ -315,7 +422,8 @@ globalThis.DR = globalThis.DR || {};
     S.targets.forEach(function (tg) {
       const dx = tg.x - me.x, dy = tg.y - me.y, dz = tg.z - me.z, d = Math.hypot(dx, dy, dz);
       if (d > CFG.assistRange || d < 1) return;
-      const ang = Math.acos(U.clamp((dx * a.x + dy * a.y + dz * a.z) / d, -1, 1));
+      // A big target (the boss) is easier to line up on.
+      const ang = Math.acos(U.clamp((dx * a.x + dy * a.y + dz * a.z) / d, -1, 1)) - (tg.spec.boss ? Math.min(0.06, 2.5 / d) : 0);
       if (ang < bestAng) { bestAng = ang; best = tg; }
     });
     let dx = a.x, dy = a.y, dz = a.z;
@@ -343,14 +451,15 @@ globalThis.DR = globalThis.DR || {};
       if (sh.life <= 0) return false;
       if (sh.y < T.terrain(sh.x, sh.z) || T.hit(sh.x, sh.y, sh.z, 0.1)) { S.events.push({ k: "spark", x: sh.x, y: sh.y, z: sh.z }); return false; }
       for (let i = 0; i < S.targets.length; i++) {
-        const tg = S.targets[i], R = tg.spec.ace ? CFG.aceR : CFG.tR;
+        const tg = S.targets[i], R = targetR(tg.spec);
         if (segDist2(sh.px, sh.py, sh.pz, sh.x, sh.y, sh.z, tg.x, tg.y, tg.z) > R * R) continue;
         me.shotsHit++;
         tg.hp--; tg.flash = 0.12; tg.evadeT = 1.4;
         if (tg.hp <= 0) {
           S.targets.splice(i, 1);
           me.score += tg.spec.pts; me.lastKillT = S.huntT(); S.kills++;
-          S.events.push({ k: "kill", p: me.id, id: tg.id, pts: tg.spec.pts, ace: tg.spec.ace, x: tg.x, y: tg.y, z: tg.z });
+          if (tg.spec.boss) { S.boss = null; S.bossKills++; S.bossT = S.huntT() + CFG.bossBack; }
+          S.events.push({ k: "kill", p: me.id, id: tg.id, pts: tg.spec.pts, ace: tg.spec.ace, boss: !!tg.spec.boss, mini: !!tg.spec.mini, x: tg.x, y: tg.y, z: tg.z });
         } else S.events.push({ k: "thit", id: tg.id, x: sh.x, y: sh.y, z: sh.z });
         return false;
       }

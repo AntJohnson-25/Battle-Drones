@@ -112,7 +112,11 @@ globalThis.DR = globalThis.DR || {};
       case "roll": noise(0.35, 0.18, 600, 2400); break;
       case "flip": noise(0.45, 0.2, 400, 2600); tone(300, 0.4, "triangle", 0.06, 900); break;
       case "dodge": tone(1400, 0.08, "sine", 0.08); tone(1900, 0.1, "sine", 0.07, 0, 0.06); break;
-      case "prox": tone(1250, 0.045, "square", 0.04); break;
+      case "boss": [196, 185, 174, 147].forEach(function (f, i) { tone(f, 0.34, "sawtooth", 0.13, 0, i * 0.24); tone(f / 2, 0.34, "square", 0.08, 0, i * 0.24); }); break;
+      case "bossdown": noise(1.3, 0.5, 2400, 60); tone(220, 1.1, "sawtooth", 0.14, 40); [523, 659, 784, 1047, 1319].forEach(function (f, i) { tone(f, 0.18, "square", 0.09, 0, 0.3 + i * 0.09); }); break;
+      case "mini": tone(900, 0.12, "triangle", 0.05, 1500); break;
+      case "troll": noise(0.2, 0.06, 900, 2600); break;
+      case "prox":tone(1250, 0.045, "square", 0.04); break;
       case "prox2": tone(1650, 0.045, "square", 0.06); break;
     }
   };

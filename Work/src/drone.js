@@ -170,7 +170,10 @@ globalThis.DR = globalThis.DR || {};
   // at the back facing you and a little gun pod. Bigger than yours so they read
   // at a distance.
   const tShared = {};
-  D.makeTarget = function (ace) {
+  D.makeTarget = function (spec) {
+    if (spec.boss) return makeBoss(spec.who, spec.name);
+    if (spec.mini) return makeMini(spec.who);
+    const ace = spec.ace;
     if (!tShared.body) {
       tShared.body = new THREE.OctahedronGeometry(0.5, 0); tShared.body.scale(1.1, 0.45, 1.4);
       tShared.arm = new THREE.BoxGeometry(1.6, 0.06, 0.12);
@@ -200,17 +203,213 @@ globalThis.DR = globalThis.DR || {};
     halo.scale.set(3.2, 3.2, 1); root.add(halo);
     const sc = ace ? 2.6 : 2.0;
     tilt.scale.setScalar(sc);
-    return { root: root, tilt: tilt, body: body, eyeMat: eyeMat, glow: glow, rotors: rotors, halo: halo, mats: [plate.material, eyeMat] };
+    return { root: root, tilt: tilt, flash: [[body, tShared.dark]], eyeMat: eyeMat, glow: glow, rotors: rotors, halo: halo };
   };
   D.updateTarget = function (m, tg, dt, now) {
-    m.root.position.set(tg.x, tg.y + Math.sin(now * 5 + tg.id) * 0.08, tg.z);
+    m.root.position.set(tg.x, tg.y + Math.sin(now * 5 + tg.id) * (m.boss ? 0.3 : 0.08), tg.z);
     m.root.rotation.set(0, tg.yaw, 0);
-    m.tilt.rotation.set(-0.15, 0, tg.bank, "YXZ");
+    // A barrel roll spins it a full turn about its nose.
+    m.tilt.rotation.set(m.boss ? -0.05 : -0.15, 0, tg.bank * (m.boss ? 0.5 : 1) + (tg.spin || 0), "YXZ");
     // Flash white when hit.
-    m.body.material = tg.flash > 0 ? tShared.hit : tShared.dark;
+    const hit = tg.flash > 0;
+    if (m.wasHit !== hit) { m.wasHit = hit; m.flash.forEach(function (f) { f[0].material = hit ? (tShared.hit || (tShared.hit = new THREE.MeshBasicMaterial({ color: 0xffffff }))) : f[1]; }); }
+    // Eyes flare white just before it fires.
     m.eyeMat.color.setHex(tg.fireT < 0.35 ? 0xffffff : m.glow);
-    m.halo.material.opacity = 0.45 + Math.sin(now * 6 + tg.id) * 0.12;
+    m.halo.material.opacity = (m.boss ? 0.3 : 0.45) + Math.sin(now * 6 + tg.id) * 0.12;
+    if (m.spinners) m.spinners.forEach(function (s, i) { s.rotation.y += dt * 30 * (i % 2 ? -1 : 1); });
+    if (m.tag) m.tag.visible = true;
   };
+
+  // ------------------------------------------------------------------ bosses and their pests
+  // One villain per course, riding something that flies. They all have glowing
+  // red eyes and they face backwards, at you. Built from simple shapes, about
+  // 1 unit = 1 m before the 3x scale-up.
+  const RED = 0xff1228;
+  function mesh(geo, mat, x, y, z, parent) { const m = new THREE.Mesh(geo, mat); m.position.set(x || 0, y || 0, z || 0); if (parent) parent.add(m); return m; }
+  function bx(w, h, d) { return new THREE.BoxGeometry(w, h, d); }
+  // Four rotors on outriggers, the thing that makes it a drone.
+  function rotorRig(tilt, span, len, y, colour) {
+    const metal = lam(0x50586a), discMat = new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.DoubleSide });
+    const disc = new THREE.CircleGeometry(0.42, 14); disc.rotateX(-Math.PI / 2);
+    const blade = bx(0.8, 0.02, 0.07);
+    const spinners = [];
+    [[1, -1], [-1, -1], [1, 1], [-1, 1]].forEach(function (c) {
+      const arm = mesh(bx(span, 0.07, 0.1), metal, c[0] * span / 2, y, c[1] * len, tilt);
+      arm.rotation.z = 0;
+      mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.16, 8), metal, c[0] * span, y + 0.08, c[1] * len, tilt);
+      const g = new THREE.Group(); g.position.set(c[0] * span, y + 0.18, c[1] * len);
+      g.add(new THREE.Mesh(disc, discMat)); g.add(new THREE.Mesh(blade, metal));
+      tilt.add(g); spinners.push(g);
+    });
+    return spinners;
+  }
+  // Head with two glowing red eyes on its +Z face (looking back at the player).
+  function redEyes(parent, y, z, gap, size, eyeMat) {
+    const g = new THREE.SphereGeometry(size, 8, 6);
+    mesh(g, eyeMat, -gap, y, z, parent); mesh(g, eyeMat, gap, y, z, parent);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTex(), color: RED, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.9 }));
+    glow.scale.set(size * 9, size * 5, 1); glow.position.set(0, y, z + 0.05); parent.add(glow);
+  }
+  function bossShell(scale, name) {
+    const root = new THREE.Group(), tilt = new THREE.Group();
+    root.add(tilt);
+    tilt.scale.setScalar(scale);
+    const eyeMat = new THREE.MeshBasicMaterial({ color: RED });
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTex(), color: RED, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.3 }));
+    halo.scale.set(scale * 4.4, scale * 4.4, 1); root.add(halo);
+    const m = { root: root, tilt: tilt, flash: [], eyeMat: eyeMat, glow: RED, halo: halo, boss: true };
+    if (name) { m.tag = nameTag(name, RED); m.tag.scale.set(13, 3.25, 1); m.tag.position.y = scale * 2.1 + 1.6; root.add(m.tag); }
+    return m;
+  }
+  function flashable(m, obj, mat) { m.flash.push([obj, mat]); return obj; }
+
+  function makeBoss(who, name) {
+    const m = bossShell(3, name), t = m.tilt;
+    if (who === "santa") santa(m, t); else if (who === "pharaoh") pharaoh(m, t); else ceo(m, t);
+    return m;
+  }
+
+  // Evil Santa in his sleigh drone, sack of pests behind him.
+  function santa(m, t) {
+    const red = lam(0xc4161c), dark = lam(0x7a0d12), gold = lam(0xf2c14e), white = lam(0xf6f3ee), skin = lam(0xe8b89a), black = lam(0x1a1c22), sack = lam(0x6b4a2a);
+    flashable(m, mesh(bx(1.3, 0.5, 2.3), red, 0, 0, 0, t), red);                     // sleigh tub
+    flashable(m, mesh(bx(1.3, 0.9, 0.18), dark, 0, 0.45, -1.15, t), dark);           // high curled front
+    mesh(bx(1.34, 0.1, 2.34), gold, 0, 0.27, 0, t);                                   // gold rail
+    mesh(bx(1.1, 0.4, 0.18), dark, 0, 0.3, 1.1, t);                                   // low tail board
+    [-0.6, 0.6].forEach(function (x) {                                                // runners
+      mesh(bx(0.08, 0.08, 2.9), gold, x, -0.55, 0, t);
+      mesh(bx(0.06, 0.3, 0.06), gold, x, -0.4, -0.8, t); mesh(bx(0.06, 0.3, 0.06), gold, x, -0.4, 0.8, t);
+      const curl = mesh(bx(0.08, 0.45, 0.08), gold, x, -0.37, -1.52, t); curl.rotation.x = 0.7;
+    });
+    mesh(new THREE.SphereGeometry(0.55, 8, 6), sack, 0, 0.55, -0.6, t).scale.set(1, 1.1, 0.9);   // the sack, up front
+    // Santa, at the back and turned to face you.
+    const s = new THREE.Group(); s.position.set(0, 0.25, 0.45); t.add(s);
+    mesh(new THREE.SphereGeometry(0.48, 10, 8), red, 0, 0.45, 0, s).scale.set(1, 1.05, 0.9);       // belly
+    mesh(bx(0.99, 0.13, 0.9), black, 0, 0.35, 0, s); mesh(bx(0.2, 0.17, 0.05), gold, 0, 0.35, 0.45, s);   // belt, buckle
+    mesh(bx(0.99, 0.1, 0.9), white, 0, 0.08, 0, s);                                   // fur trim
+    const head = new THREE.Group(); head.position.set(0, 1.08, 0.05); s.add(head);
+    mesh(new THREE.SphereGeometry(0.27, 10, 8), skin, 0, 0, 0, head);
+    mesh(new THREE.SphereGeometry(0.27, 8, 6), white, 0, -0.19, 0.12, head).scale.set(1.05, 0.95, 0.75);   // beard
+    mesh(bx(0.5, 0.06, 0.08), black, 0, 0.13, 0.24, head).rotation.z = 0;             // heavy brow
+    const bl = mesh(bx(0.22, 0.05, 0.06), black, -0.13, 0.15, 0.26, head); bl.rotation.z = -0.45;
+    const br = mesh(bx(0.22, 0.05, 0.06), black, 0.13, 0.15, 0.26, head); br.rotation.z = 0.45;
+    redEyes(head, 0.06, 0.25, 0.1, 0.055, m.eyeMat);
+    mesh(new THREE.CylinderGeometry(0.29, 0.29, 0.12, 10), white, 0, 0.24, 0, head);  // hat band
+    const hat = mesh(new THREE.ConeGeometry(0.26, 0.6, 8), red, -0.08, 0.55, -0.05, head); hat.rotation.z = 0.5;
+    mesh(new THREE.SphereGeometry(0.09, 6, 5), white, -0.3, 0.76, -0.05, head);       // pom
+    [-1, 1].forEach(function (sd) {                                                   // arms out on the rail
+      const a = mesh(bx(0.2, 0.2, 0.6), red, sd * 0.55, 0.6, 0.1, s); a.rotation.y = sd * 0.5;
+      mesh(new THREE.SphereGeometry(0.12, 6, 5), black, sd * 0.68, 0.6, 0.38, s);
+    });
+    mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.9, 6), black, 0, -0.1, 1.4, t).rotation.x = Math.PI / 2;   // tail gun
+    m.spinners = rotorRig(t, 1.25, 1.0, 0.1, RED);
+  }
+
+  // The Big Tech CEO: suit, red tie, standing at a podium on a sleek executive drone.
+  function ceo(m, t) {
+    const hull = lam(0xeef1f6), dark = lam(0x14171f), suit = lam(0x1d2433), shirt = lam(0xf4f6fa), tie = lam(0xd0182a), skin = lam(0xe2b596), hair = lam(0x2a2018), glass = new THREE.MeshBasicMaterial({ color: 0x35d6ff });
+    flashable(m, mesh(new THREE.CylinderGeometry(1.15, 0.85, 0.3, 14), hull, 0, 0, 0, t), hull);      // the platform
+    mesh(new THREE.CylinderGeometry(1.17, 1.17, 0.06, 14), dark, 0, 0.17, 0, t);
+    mesh(new THREE.TorusGeometry(1.0, 0.04, 4, 20), glass, 0, -0.16, 0, t).rotation.x = Math.PI / 2;  // underglow ring
+    flashable(m, mesh(bx(0.7, 0.75, 0.3), dark, 0, 0.55, 0.62, t), dark);                              // podium, facing you
+    mesh(bx(0.5, 0.3, 0.02), glass, 0, 0.62, 0.78, t);                                                 // its logo screen
+    // The man himself, turned to face you.
+    const s = new THREE.Group(); s.position.set(0, 0.2, 0.05); t.add(s);
+    [-0.14, 0.14].forEach(function (x) { mesh(bx(0.2, 0.75, 0.22), suit, x, 0.38, 0, s); mesh(bx(0.21, 0.08, 0.34), dark, x, 0.04, 0.05, s); });   // legs, shoes
+    mesh(bx(0.66, 0.75, 0.34), suit, 0, 1.1, 0, s);                                   // jacket
+    mesh(bx(0.2, 0.55, 0.02), shirt, 0, 1.2, 0.175, s);                               // shirt front
+    mesh(bx(0.08, 0.5, 0.02), tie, 0, 1.17, 0.19, s);                                 // red tie
+    const l1 = mesh(bx(0.16, 0.5, 0.02), suit, -0.13, 1.25, 0.185, s); l1.rotation.z = 0.28;          // lapels
+    const l2 = mesh(bx(0.16, 0.5, 0.02), suit, 0.13, 1.25, 0.185, s); l2.rotation.z = -0.28;
+    [-1, 1].forEach(function (sd) {                                                   // arms folded onto the podium
+      mesh(bx(0.17, 0.5, 0.2), suit, sd * 0.42, 1.2, 0.04, s);
+      const f = mesh(bx(0.16, 0.16, 0.5), suit, sd * 0.38, 0.95, 0.28, s); f.rotation.y = sd * -0.35;
+      mesh(new THREE.SphereGeometry(0.09, 6, 5), skin, sd * 0.3, 0.95, 0.52, s);
+    });
+    const head = new THREE.Group(); head.position.set(0, 1.72, 0.02); s.add(head);
+    mesh(bx(0.34, 0.4, 0.34), skin, 0, 0, 0, head);
+    mesh(bx(0.37, 0.14, 0.37), hair, 0, 0.2, -0.01, head); mesh(bx(0.37, 0.3, 0.1), hair, 0, 0.05, -0.15, head);   // neat hair
+    mesh(bx(0.2, 0.025, 0.02), dark, 0, -0.11, 0.175, head);                          // thin smile
+    mesh(bx(0.04, 0.05, 0.3), dark, 0.2, 0.02, 0.02, head);                           // earpiece
+    redEyes(head, 0.05, 0.175, 0.085, 0.045, m.eyeMat);
+    [-0.5, 0.5].forEach(function (x) { mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.8, 6), dark, x, -0.15, 1.0, t).rotation.x = Math.PI / 2; });   // twin guns
+    m.spinners = rotorRig(t, 1.45, 0.95, 0.05, 0x35d6ff);
+  }
+
+  // The Mummy Pharaoh, sat up in his flying gold sarcophagus.
+  function pharaoh(m, t) {
+    const gold = lam(0xe9b93a), goldD = lam(0xb98522), blue = lam(0x1f4fb8), wrap = lam(0xd9d0b4), wrapD = lam(0xb3a784), teal = lam(0x1fb5a8), dark = lam(0x2a2218);
+    flashable(m, mesh(bx(1.15, 0.5, 2.7), gold, 0, 0, 0, t), gold);                    // the coffin
+    flashable(m, mesh(bx(0.85, 0.45, 0.5), goldD, 0, -0.02, -1.5, t), goldD);          // tapered foot
+    for (let i = 0; i < 5; i++) mesh(bx(1.17, 0.52, 0.12), i % 2 ? blue : teal, 0, 0, -0.9 + i * 0.42, t);   // enamel bands
+    const lid = mesh(bx(1.1, 0.1, 1.5), goldD, 0.75, 0.2, -0.5, t); lid.rotation.z = -1.1;   // lid thrown open
+    // The mummy, sat up and turned to face you.
+    const s = new THREE.Group(); s.position.set(0, 0.2, 0.55); t.add(s);
+    mesh(bx(0.62, 0.85, 0.36), wrap, 0, 0.5, 0, s);
+    for (let i = 0; i < 4; i++) { const b = mesh(bx(0.64, 0.05, 0.38), wrapD, 0, 0.2 + i * 0.2, 0, s); b.rotation.z = (i % 2 ? 1 : -1) * 0.12; }   // bandage lines
+    [-1, 1].forEach(function (sd) {                                                    // arms reaching for you
+      const a = mesh(bx(0.16, 0.16, 0.75), wrap, sd * 0.36, 0.72, 0.38, s); a.rotation.x = -0.15;
+      mesh(bx(0.17, 0.05, 0.17), wrapD, sd * 0.36, 0.76, 0.5, s);
+    });
+    mesh(new THREE.TorusGeometry(0.3, 0.07, 5, 12, Math.PI), gold, 0, 0.9, 0.12, s).rotation.set(0.4, 0, Math.PI);   // collar
+    const head = new THREE.Group(); head.position.set(0, 1.2, 0.02); s.add(head);
+    mesh(bx(0.32, 0.38, 0.32), wrap, 0, 0, 0, head);
+    mesh(bx(0.34, 0.05, 0.34), wrapD, 0, -0.08, 0, head).rotation.z = 0.15;
+    mesh(bx(0.3, 0.1, 0.05), dark, 0, 0.05, 0.15, head);                               // the gap the eyes glow from
+    redEyes(head, 0.05, 0.17, 0.08, 0.045, m.eyeMat);
+    // Nemes headdress: striped cloth, flaps on the shoulders, a cobra on the brow.
+    mesh(bx(0.5, 0.2, 0.42), gold, 0, 0.25, -0.02, head);
+    [-1, 1].forEach(function (sd) {
+      const f = mesh(bx(0.14, 0.62, 0.3), gold, sd * 0.27, -0.12, -0.02, head); f.rotation.z = sd * 0.16;
+      for (let i = 0; i < 3; i++) mesh(bx(0.15, 0.06, 0.31), blue, sd * (0.25 + i * 0.025), 0.08 - i * 0.2, -0.02, head).rotation.z = sd * 0.16;
+    });
+    mesh(bx(0.51, 0.05, 0.43), blue, 0, 0.22, -0.02, head); mesh(bx(0.51, 0.05, 0.43), blue, 0, 0.31, -0.02, head);
+    mesh(bx(0.06, 0.2, 0.06), teal, 0, 0.36, 0.2, head);
+    mesh(bx(0.09, 0.45, 0.07), blue, 0, -0.38, 0.17, head);                            // the false beard
+    mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.9, 6), dark, 0, -0.15, 1.55, t).rotation.x = Math.PI / 2;   // tail gun
+    m.spinners = rotorRig(t, 1.3, 1.05, 0.1, 0xffd45a);
+  }
+
+  // The pests each boss lets loose: gift boxes, phones, scarabs. Small, one hit.
+  const miniShared = {};
+  function makeMini(who) {
+    const root = new THREE.Group(), tilt = new THREE.Group();
+    root.add(tilt);
+    tilt.scale.setScalar(1.7);
+    const eyeMat = new THREE.MeshBasicMaterial({ color: RED });
+    const m = { root: root, tilt: tilt, flash: [], eyeMat: eyeMat, glow: RED, mini: true };
+    let colour = RED;
+    if (who === "santa") {
+      const paper = miniShared.paper || (miniShared.paper = lam(0x1f9d4d)), ribbon = miniShared.ribbon || (miniShared.ribbon = lam(0xf2c14e));
+      flashable(m, mesh(bx(0.6, 0.5, 0.6), paper, 0, 0, 0, tilt), paper);
+      mesh(bx(0.62, 0.52, 0.14), ribbon, 0, 0, 0, tilt); mesh(bx(0.14, 0.52, 0.62), ribbon, 0, 0, 0, tilt);
+      [-1, 1].forEach(function (sd) { mesh(new THREE.SphereGeometry(0.12, 6, 4), ribbon, sd * 0.12, 0.32, 0, tilt).scale.set(1.4, 0.8, 0.6); });
+    } else if (who === "pharaoh") {
+      const shell = miniShared.shell || (miniShared.shell = lam(0x12a89a)), gold = miniShared.gold || (miniShared.gold = lam(0xe9b93a));
+      flashable(m, mesh(new THREE.SphereGeometry(0.36, 8, 6), shell, 0, 0, 0, tilt), shell).scale.set(1, 0.55, 1.35);
+      mesh(bx(0.03, 0.03, 0.9), gold, 0, 0.2, 0, tilt);
+      mesh(new THREE.SphereGeometry(0.17, 6, 5), gold, 0, 0, -0.5, tilt);
+      [-1, 1].forEach(function (sd) { for (let i = 0; i < 3; i++) { const l = mesh(bx(0.4, 0.03, 0.04), gold, sd * 0.45, -0.08, -0.25 + i * 0.25, tilt); l.rotation.z = sd * -0.4; } });
+      colour = 0xffd45a;
+    } else {
+      const slab = miniShared.slab || (miniShared.slab = lam(0x14171f));
+      flashable(m, mesh(bx(0.5, 0.06, 0.95), slab, 0, 0, 0, tilt), slab);
+      mesh(bx(0.44, 0.02, 0.86), new THREE.MeshBasicMaterial({ color: 0x35d6ff }), 0, 0.04, 0, tilt);
+      mesh(new THREE.CircleGeometry(0.11, 10), new THREE.MeshBasicMaterial({ color: RED }), 0.16, 0.055, -0.3, tilt).rotation.x = -Math.PI / 2;   // the notification dot
+      colour = 0x35d6ff;
+    }
+    // Two red eyes on the back of every one of them, and four little rotors.
+    const eg = miniShared.eye || (miniShared.eye = new THREE.SphereGeometry(0.07, 6, 5));
+    mesh(eg, eyeMat, -0.12, 0.02, who === "pharaoh" ? 0.46 : who === "santa" ? 0.31 : 0.48, tilt);
+    mesh(eg, eyeMat, 0.12, 0.02, who === "pharaoh" ? 0.46 : who === "santa" ? 0.31 : 0.48, tilt);
+    const disc = miniShared.disc || (miniShared.disc = (function () { const g = new THREE.CircleGeometry(0.2, 10); g.rotateX(-Math.PI / 2); return g; })());
+    const discMat = new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.DoubleSide });
+    [[1, -1], [-1, -1], [1, 1], [-1, 1]].forEach(function (c) { mesh(disc, discMat, c[0] * 0.48, 0.3, c[1] * 0.4, tilt); });
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTex(), color: RED, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.45 }));
+    halo.scale.set(2.4, 2.4, 1); root.add(halo);
+    m.halo = halo;
+    return m;
+  }
   let haloT = null;
   function haloTex() {
     if (haloT) return haloT;

@@ -42,6 +42,8 @@ DR.Track.COURSES.forEach(function (course) {
   check("targets never inside walls", insideWall === 0, insideWall + " frames");
   check("solid obstacles on the course", T.obs.length > 100, T.obs.length + " (" + Array.from(new Set(T.obs.map(function (o) { return o.kind; }))).join(", ") + ")");
   check("tricks used and fire dodged", (counts.trick || 0) > 0 && (counts.dodge || 0) > 0, "tricks " + (counts.trick || 0) + ", dodges " + (counts.dodge || 0));
+  check("targets rolled out of the way", (counts.troll || 0) > 3, (counts.troll || 0) + " rolls");
+  check("the boss turned up with his pests", S.bossSeen >= 1 && S.minis >= 3, DR.BOSS[course].name + ": seen " + S.bossSeen + ", downed " + S.bossKills + ", minis " + S.minis);
   console.log("  crashes " + (counts.crash || 0));
   if (counts.down) check("respawned after being shot down", (counts.respawn || 0) >= counts.down - 1);
 });

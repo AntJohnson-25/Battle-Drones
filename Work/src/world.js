@@ -9,8 +9,9 @@ globalThis.DR = globalThis.DR || {};
   const W = { built: {} };
 
   const LOOK = {
-    city: { skyTop: 0x3f6fd8, horizon: 0xffc8a0, fog: 0xe6c6b2, fogNear: 140, fogFar: 640, hemiG: 0x5b5f6e, sun: 0xffe2c0 },
-    mountain: { skyTop: 0x4f9cff, horizon: 0xe8f1ff, fog: 0xdfe9f5, fogNear: 180, fogFar: 760, hemiG: 0x6b8f4e, sun: 0xfff1d6 }
+    city: { skyTop: 0x3566d6, horizon: 0xffc8a0, fog: 0xe6c6b2, fogNear: 260, fogFar: 980, hemiG: 0x5b5f6e, sun: 0xffe2c0 },
+    mountain: { skyTop: 0x3f8ff5, horizon: 0xe8f1ff, fog: 0xdfe9f5, fogNear: 320, fogFar: 1100, hemiG: 0x6b8f4e, sun: 0xfff1d6 },
+    dunes: { skyTop: 0x2f86e6, horizon: 0xffe3b0, fog: 0xf3dcae, fogNear: 300, fogFar: 1050, hemiG: 0xb98a4a, sun: 0xfff0cc }
   };
   W.LOOK = LOOK;
   function lambert(color, extra) { return new THREE.MeshLambertMaterial(Object.assign({ color: color, flatShading: true }, extra || {})); }
@@ -20,9 +21,10 @@ globalThis.DR = globalThis.DR || {};
     W.scene = scene;
     W.sky = sky();
     scene.add(W.sky);
-    W.hemi = new THREE.HemisphereLight(0xdcefff, 0x6b8f4e, 1.25);
+    // A strong sun over a softer sky light: faces read as clearly lit or clearly in shade.
+    W.hemi = new THREE.HemisphereLight(0xdcefff, 0x6b8f4e, 1.0);
     scene.add(W.hemi);
-    W.sun = new THREE.DirectionalLight(0xfff1d6, 1.7);
+    W.sun = new THREE.DirectionalLight(0xfff1d6, 2.2);
     W.sun.position.set(-160, 260, 120);
     scene.add(W.sun);
     scene.add(clouds());
@@ -32,7 +34,7 @@ globalThis.DR = globalThis.DR || {};
   W.show = function (T) {
     if (!W.built[T.course]) {
       const g = new THREE.Group();
-      if (T.course === "city") city(g, T); else mountain(g, T);
+      if (T.course === "city") city(g, T); else if (T.course === "dunes") dunes(g, T); else mountain(g, T);
       g.add(chevrons(T));
       g.add(pads(T));
       const st = stand(T);
@@ -188,13 +190,16 @@ globalThis.DR = globalThis.DR || {};
   function wallTextures() {
     const rng = U.rng(5);
     function canvas(draw) {
+      // Drawn at 4x (512 px) so windows stay sharp up close and at a glancing angle.
       const c = document.createElement("canvas");
-      c.width = c.height = 128;
-      draw(c.getContext("2d"));
+      c.width = c.height = 512;
+      const x = c.getContext("2d");
+      x.scale(4, 4);
+      draw(x);
       const t = new THREE.CanvasTexture(c);
       t.wrapS = t.wrapT = THREE.RepeatWrapping;
       t.colorSpace = THREE.SRGBColorSpace;
-      t.anisotropy = 8;
+      t.anisotropy = W.aniso || 8;
       return t;
     }
     function glass(x, X, Y, w, h, lit, base) {
@@ -263,7 +268,7 @@ globalThis.DR = globalThis.DR || {};
     });
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
-    t.anisotropy = 8;
+    t.anisotropy = W.aniso || 8;
     return t;
   }
   function shade(hex) { const k = new THREE.Color(hex).multiplyScalar(0.55); return "#" + k.getHexString(); }
@@ -378,6 +383,119 @@ globalThis.DR = globalThis.DR || {};
     });
     [trunk, leaf, rock].forEach(function (x) { x.frustumCulled = false; group.add(x); });
   }
+
+  // ------------------------------------------------------------------ dunes
+  const DPAL = { sand: 0xe9c98a, sandLight: 0xf6dfa6, sandDark: 0xc99a5b, track: 0xdcb878, stone: 0xd9b36c, stoneDark: 0xb88d4c, wet: 0x8a9a5a,
+    trunk: 0x8a6238, palm: 0x3f9a4a, palm2: 0x58b05a, rock: 0xa9845a, obelisk: 0xcfa968, gold: 0xffd45a, water: 0x3fb8d8 };
+  function dunes(group, T) {
+    const G = T.terrainGrid, n = G.n, N1 = n + 1;
+    const pos = new Float32Array(N1 * N1 * 3), col = new Float32Array(N1 * N1 * 3);
+    const c = new THREE.Color(), cB = new THREE.Color();
+    const rng = U.rng(11);
+    for (let iz = 0; iz < N1; iz++) for (let ix = 0; ix < N1; ix++) {
+      const k = iz * N1 + ix, h = G.H[k], d = G.near[k];
+      pos[k * 3] = G.x0 + ix * G.cell; pos[k * 3 + 1] = h; pos[k * 3 + 2] = G.z0 + iz * G.cell;
+      const hx = G.H[iz * N1 + Math.min(n, ix + 1)] - G.H[iz * N1 + Math.max(0, ix - 1)];
+      const hz = G.H[Math.min(n, iz + 1) * N1 + ix] - G.H[Math.max(0, iz - 1) * N1 + ix];
+      const slope = Math.hypot(hx, hz) / (G.cell * 2);
+      if (G.kind[k] === 1) {
+        // Pyramid: stone courses, banded by height.
+        c.setHex((Math.floor(h / 4) & 1) ? DPAL.stone : DPAL.stoneDark);
+      } else if (G.kind[k] === 2) c.setHex(DPAL.wet);
+      else {
+        // The sunlit side of each dune is pale, the lee side darker: reads the shape.
+        c.setHex(DPAL.sand).lerp(cB.setHex(hx - hz * 0.4 > 0 ? DPAL.sandDark : DPAL.sandLight), U.clamp(slope * 1.6, 0, 0.85));
+        if (d < 16) c.lerp(cB.setHex(DPAL.track), 0.5);
+      }
+      const j = 0.96 + rng() * 0.07;
+      col[k * 3] = c.r * j; col[k * 3 + 1] = c.g * j; col[k * 3 + 2] = c.b * j;
+    }
+    const idx = [];
+    for (let iz = 0; iz < n; iz++) for (let ix = 0; ix < n; ix++) {
+      const a = iz * N1 + ix, b = a + 1, cc = a + N1, dd = cc + 1;
+      idx.push(a, cc, b, b, cc, dd);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, lambert(0xffffff, { vertexColors: true }));
+    m.matrixAutoUpdate = false;
+    group.add(m);
+    // The oasis pool.
+    const O = T.oasis;
+    const pool = new THREE.Mesh(new THREE.CircleGeometry(O.r * 0.95, 28), new THREE.MeshBasicMaterial({ color: DPAL.water }));
+    pool.rotation.x = -Math.PI / 2;
+    pool.position.set(O.x, T.terrain(O.x, O.z) + 0.9, O.z);
+    group.add(pool);
+    // Gold caps on the pyramids.
+    T.pyramids.forEach(function (p) {
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(p.half * 0.14, p.h * 0.14, 4), new THREE.MeshBasicMaterial({ color: DPAL.gold }));
+      cap.rotation.y = Math.PI / 4;
+      cap.position.set(p.x, p.h + 6 + p.h * 0.02, p.z);
+      group.add(cap);
+    });
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), s = new THREE.Vector3(), p = new THREE.Vector3();
+    // Obelisks: a tapered shaft with a gold point.
+    const shaftGeo = new THREE.CylinderGeometry(0.75, 1.3, 1, 4); shaftGeo.translate(0, 0.5, 0); shaftGeo.rotateY(Math.PI / 4);
+    const tipGeo = new THREE.ConeGeometry(0.8, 1.8, 4); tipGeo.translate(0, 0.9, 0); tipGeo.rotateY(Math.PI / 4);
+    const shaft = new THREE.InstancedMesh(shaftGeo, lambert(DPAL.obelisk), T.obelisks.length);
+    const tip = new THREE.InstancedMesh(tipGeo, new THREE.MeshBasicMaterial({ color: DPAL.gold }), T.obelisks.length);
+    T.obelisks.forEach(function (o, i) {
+      q.setFromEuler(e.set(0, o[4], 0));
+      shaft.setMatrixAt(i, m4.compose(p.set(o[0], o[1] - 0.5, o[2]), q, s.set(1, o[3] - 1.3, 1)));
+      tip.setMatrixAt(i, m4.compose(p.set(o[0], o[1] + o[3] - 1.8, o[2]), q, s.set(1, 1, 1)));
+    });
+    // Ruined columns: fluted drums, some broken short, with a cap slab.
+    const colGeo = new THREE.CylinderGeometry(0.85, 1, 1, 8); colGeo.translate(0, 0.5, 0);
+    const capGeo = new THREE.BoxGeometry(2.4, 0.5, 2.4); capGeo.translate(0, 0.25, 0);
+    const cols = new THREE.InstancedMesh(colGeo, lambert(0xe3cfa0), T.columns.length);
+    const caps = new THREE.InstancedMesh(capGeo, lambert(0xcdb682), T.columns.length);
+    T.columns.forEach(function (o, i) {
+      const h = (4 + o[4] * 5) * o[3];
+      q.setFromEuler(e.set(0, o[4] * 6, 0));
+      cols.setMatrixAt(i, m4.compose(p.set(o[0], o[1] - 0.5, o[2]), q, s.set(o[3], h, o[3])));
+      q.setFromEuler(e.set(o[4] > 0.6 ? 0.25 : 0, o[4] * 6, 0));
+      caps.setMatrixAt(i, m4.compose(p.set(o[0], o[1] + h - 0.5, o[2]), q, s.set(o[3], 1, o[3])));
+    });
+    // Palms: a leaning trunk and a crown of fronds.
+    const trunkGeo = new THREE.CylinderGeometry(0.22, 0.38, 8, 6); trunkGeo.translate(0, 4, 0);
+    const frond = new THREE.ConeGeometry(0.9, 4.6, 4); frond.scale(1, 1, 0.22); frond.rotateZ(-Math.PI / 2 + 0.45); frond.translate(2.1, -0.6, 0);
+    const crownParts = [];
+    for (let a = 0; a < 7; a++) { const f = frond.clone(); f.rotateY(a / 7 * Math.PI * 2); crownParts.push(f); }
+    const crownGeo = mergeGeos(crownParts); crownGeo.translate(0, 8.1, 0);
+    const trunk = new THREE.InstancedMesh(trunkGeo, lambert(DPAL.trunk), T.palms.length);
+    const crown = new THREE.InstancedMesh(crownGeo, lambert(0xffffff), T.palms.length);
+    T.palms.forEach(function (t, i) {
+      q.setFromEuler(e.set((t[4] - 0.5) * 0.3, t[4] * 6, (t[4] - 0.5) * 0.25));
+      m4.compose(p.set(t[0], t[1] - 0.4, t[2]), q, s.set(t[3], t[3], t[3]));
+      trunk.setMatrixAt(i, m4); crown.setMatrixAt(i, m4);
+      crown.setColorAt(i, c.setHex(t[4] < 0.5 ? DPAL.palm : DPAL.palm2));
+    });
+    const rock = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), lambert(DPAL.rock), T.rocks.length);
+    T.rocks.forEach(function (r, i) {
+      p.set(r[0], r[1] + r[3] * 0.3, r[2]); s.set(r[3] * 1.3, r[3], r[3]); q.setFromEuler(e.set(r[4], r[4] * 2, 0));
+      rock.setMatrixAt(i, m4.compose(p, q, s));
+    });
+    [shaft, tip, cols, caps, trunk, crown, rock].forEach(function (x) { x.frustumCulled = false; group.add(x); });
+  }
+  // Several simple geometries (same attributes) into one.
+  function mergeGeos(list) {
+    const pos = [], nor = [], idx = [];
+    list.forEach(function (g0) {
+      const g = g0.index ? g0.toNonIndexed() : g0, base = pos.length / 3;
+      const P = g.attributes.position.array, N = g.attributes.normal.array;
+      for (let i = 0; i < P.length; i++) { pos.push(P[i]); nor.push(N[i]); }
+      for (let i = 0; i < P.length / 3; i++) idx.push(base + i);
+    });
+    const out = new THREE.BufferGeometry();
+    out.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    out.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+    out.setIndex(idx);
+    return out;
+  }
+  W.mergeGeos = mergeGeos;
 
   // ------------------------------------------------------------------ shared bits
   function chevrons(T) {
