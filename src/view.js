@@ -10,8 +10,10 @@ globalThis.DR = globalThis.DR || {};
 
   V.init = function (canvas) {
     const r = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: "high-performance" });
-    V.pr = Math.min(window.devicePixelRatio || 1, 1.5);
+    // Full native sharpness (up to 2x); autoQuality steps it down if the frame rate suffers.
+    V.pr = Math.min(window.devicePixelRatio || 1, 2);
     r.setPixelRatio(V.pr);
+    DR.World.aniso = r.capabilities.getMaxAnisotropy();
     r.setSize(innerWidth, innerHeight, false);
     V.renderer = r;
     V.scene = new THREE.Scene();
@@ -168,8 +170,8 @@ globalThis.DR = globalThis.DR || {};
   // Effects asked for by main.js from the round's events.
   V.boom = function (x, y, z, big) {
     const s = V.booms.find(function (b) { return b.userData.t > 0.7; }) || V.booms[0];
-    s.position.set(x, y, z); s.userData.t = 0; s.userData.size = big ? 13 : 8; s.visible = true;
-    let n = big ? 14 : 9;
+    s.position.set(x, y, z); s.userData.t = 0; s.userData.size = big === 2 ? 30 : big ? 13 : 8; s.visible = true;
+    let n = big === 2 ? 40 : big ? 14 : 9;
     V.bits.forEach(function (b) {
       if (n <= 0 || b.userData.t < 1.4) return;
       n--;
@@ -221,7 +223,7 @@ globalThis.DR = globalThis.DR || {};
     S.targets.forEach(function (tg) {
       seen[tg.id] = true;
       let m = V.targets[tg.id];
-      if (!m) { m = DR.Drone.makeTarget(tg.spec.ace); V.fx.add(m.root); V.targets[tg.id] = m; }
+      if (!m) { m = DR.Drone.makeTarget(tg.spec); V.fx.add(m.root); V.targets[tg.id] = m; }
       DR.Drone.updateTarget(m, tg, dt, performance.now() / 1000);
     });
     Object.keys(V.targets).forEach(function (id) { if (!seen[id]) { V.fx.remove(V.targets[id].root); delete V.targets[id]; } });

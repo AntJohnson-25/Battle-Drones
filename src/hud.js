@@ -13,6 +13,10 @@ globalThis.DR = globalThis.DR || {};
       go: "HUNT!", wrong: "WRONG WAY", pts: "PTS", left: "left", leftN: "{n} targets left", none: "Pack cleared!",
       waitHost: "Waiting for the host to pick a course…", waitNext: "Waiting for the host to start the next round…",
       pick: "PICK A COURSE", city: "City", mountain: "Mountain", cityD: "Weave between the towers", mountainD: "Valleys, a high col and a gorge",
+      dunes: "Dunes", dunesD: "Pyramids, obelisks and an oasis",
+      cityB: "Boss: Big Tech CEO", mountainB: "Boss: Evil Santa", dunesB: "Boss: Mummy Pharaoh",
+      bossIn: "BOSS: {name}", bossDown: "+{n} BOSS DOWN!", mini: "+1", ob_dune: "DUNE", ob_obelisk: "OBELISK", ob_column: "COLUMN", ob_palm: "PALM",
+      pad: "Controller connected", padKeys: "Controller: left stick fly · RT / A fire · LT brake · LB / RB roll · Y flip · X camera",
       again: "HUNT AGAIN", end: "END GAME FOR EVERYONE", back: "BACK TO LOBBY", results: "FINAL SCORES", you: "you",
       pilot: "PILOT", brief: "3:00 · down as many target drones as you can · they shoot back",
       leftRace: "{name} left", host: "You're the host now", down: "SHOT DOWN", respawn: "Back in {n}",
@@ -28,6 +32,10 @@ globalThis.DR = globalThis.DR || {};
       go: "CAÇA!", wrong: "SENTIDO ERRADO", pts: "PTS", left: "saiu", leftN: "faltam {n} alvos", none: "Bando abatido!",
       waitHost: "À espera que o anfitrião escolha o percurso…", waitNext: "À espera que o anfitrião comece a próxima ronda…",
       pick: "ESCOLHE O PERCURSO", city: "Cidade", mountain: "Montanha", cityD: "Ziguezague entre as torres", mountainD: "Vales, um colo alto e uma garganta",
+      dunes: "Dunas", dunesD: "Pirâmides, obeliscos e um oásis",
+      cityB: "Chefe: CEO das Big Tech", mountainB: "Chefe: Pai Natal Malvado", dunesB: "Chefe: Faraó Múmia",
+      bossIn: "CHEFE: {name}", bossDown: "+{n} CHEFE ABATIDO!", mini: "+1", ob_dune: "DUNA", ob_obelisk: "OBELISCO", ob_column: "COLUNA", ob_palm: "PALMEIRA",
+      pad: "Comando ligado", padKeys: "Comando: manípulo esquerdo voar · RT / A disparar · LT travar · LB / RB tonneau · Y mortal · X câmara",
       again: "CAÇAR OUTRA VEZ", end: "TERMINAR O JOGO PARA TODOS", back: "VOLTAR AO LOBBY", results: "PONTUAÇÃO FINAL", you: "tu",
       pilot: "PILOTO", brief: "3:00 · abate o máximo de drones-alvo · eles disparam de volta",
       leftRace: "{name} saiu", host: "Agora és o anfitrião", down: "ABATIDO", respawn: "De volta em {n}",
@@ -61,6 +69,7 @@ globalThis.DR = globalThis.DR || {};
   H.init = function (locale) {
     H.locale = STR[locale] ? locale : "en";
     $("keys").textContent = t("keys");
+    $("padKeys").textContent = t("padKeys");
     $("endAll").textContent = t("end");
     $("backLobby").textContent = t("back");
     $("resTitle").textContent = t("results");
@@ -70,12 +79,13 @@ globalThis.DR = globalThis.DR || {};
       const c = b.getAttribute("data-course");
       b.querySelector("b").textContent = b.classList.contains("small") ? t("again") + " · " + t(c) : t(c);
       const d = b.querySelector("small"); if (d) d.textContent = t(c + "D");
+      const bo = b.querySelector("em"); if (bo) bo.textContent = t(c + "B");
     });
     H.staticCtx = $("static").getContext("2d");
     H.mini = $("minimap").getContext("2d");
     // Pooled target brackets.
     H.marks = [];
-    for (let i = 0; i < CFG.alive + 1; i++) {
+    for (let i = 0; i < CFG.alive + CFG.miniMax + 2; i++) {
       const m = document.createElement("div"); m.className = "tmark"; m.hidden = true;
       m.innerHTML = "<i></i><span></span>";
       $("marks").append(m); H.marks.push(m);
@@ -116,7 +126,7 @@ globalThis.DR = globalThis.DR || {};
   H.flash = function (text, cls, secs) { H.msg = { text: text, cls: cls || "", until: performance.now() / 1000 + (secs || 1.6) }; };
   H.hit = function (kill) { H.hitT = performance.now() / 1000; const el = $("hitmark"); el.className = kill ? "kill" : ""; el.classList.remove("on"); void el.offsetWidth; el.classList.add("on"); };
   H.points = function (text, ace) {
-    const el = $("pop"); el.textContent = text; el.className = ace ? "ace" : "";
+    const el = $("pop"); el.textContent = text; el.className = ace === "boss" ? "boss" : ace ? "ace" : "";
     void el.offsetWidth; el.classList.add("on");
   };
   H.toast = function (text) {
@@ -157,9 +167,10 @@ globalThis.DR = globalThis.DR || {};
     g.clearRect(0, 0, 170, 170);
     g.drawImage(mapBase, 0, 0);
     S.targets.forEach(function (tg) {
-      const p = mapXY(tg.x, tg.z);
+      const p = mapXY(tg.x, tg.z), k = tg.spec.boss ? 2 : tg.spec.mini ? 0.6 : 1;
       g.fillStyle = tg.spec.ace ? "#ffc23a" : "#ff2d4a";
-      g.beginPath(); g.moveTo(p[0], p[1] - 5); g.lineTo(p[0] + 4, p[1]); g.lineTo(p[0], p[1] + 5); g.lineTo(p[0] - 4, p[1]); g.fill();
+      g.beginPath(); g.moveTo(p[0], p[1] - 5 * k); g.lineTo(p[0] + 4 * k, p[1]); g.lineTo(p[0], p[1] + 5 * k); g.lineTo(p[0] - 4 * k, p[1]); g.fill();
+      if (tg.spec.boss) { g.strokeStyle = "#fff"; g.lineWidth = 1.5; g.stroke(); }
     });
     S.racers.slice().sort(function (a, b) { return (a === me) - (b === me); }).forEach(function (r) {
       if (r.left || (r !== me && !(r.rb && r.rb.length))) return;
@@ -216,8 +227,19 @@ globalThis.DR = globalThis.DR || {};
     // Score, clock, targets left, health.
     if (me) {
       set($("score"), "score", String(me.score));
-      const leftN = S.pack.length - S.next + S.targets.length;
+      let leftN = S.pack.length - S.next;
+      S.targets.forEach(function (tg) { if (!tg.spec.boss && !tg.spec.mini) leftN++; });
       set($("left"), "left", leftN ? t("leftN", { n: leftN }) : t("none"));
+    }
+    // The boss's name and health across the top while he's about.
+    const boss = S.boss && ph === "hunt" ? S.boss : null;
+    if (!!boss !== !!H.last.bossOn) { H.last.bossOn = !!boss; $("boss").hidden = !boss; }
+    if (boss) {
+      set($("bossName"), "bossName", boss.spec.name);
+      const w = Math.round(100 * boss.hp / boss.spec.hp);
+      if (H.last.bossHp !== w) { H.last.bossHp = w; $("bossFill").style.width = w + "%"; }
+    }
+    if (me) {
       const hp = me.downT > 0 ? 0 : me.hp;
       if (H.last.hp !== hp) {
         H.last.hp = hp;
@@ -268,13 +290,13 @@ globalThis.DR = globalThis.DR || {};
       const a = DR.aimDir(me);
       S.targets.forEach(function (tg) {
         const dx = tg.x - me.x, dy = tg.y - me.y, dz = tg.z - me.z, d = Math.hypot(dx, dy, dz);
-        if (d < CFG.assistRange && Math.acos(U.clamp((dx * a.x + dy * a.y + dz * a.z) / d, -1, 1)) < CFG.assist) locked = true;
+        if (d < CFG.assistRange && Math.acos(U.clamp((dx * a.x + dy * a.y + dz * a.z) / d, -1, 1)) - (tg.spec.boss ? Math.min(0.06, 2.5 / d) : 0) < CFG.assist) locked = true;
         const p = DR.View.project(tg.x, tg.y, tg.z);
         const on = !p.behind && p.x > 0 && p.x < innerWidth && p.y > 0 && p.y < innerHeight;
         if (on && used < H.marks.length - 1) {
           const m = H.marks[used++];
-          const size = U.clamp(1400 / Math.max(d, 1), 26, 90);
-          m.hidden = false; m.className = "tmark" + (tg.spec.ace ? " ace" : "");
+          const size = tg.spec.boss ? U.clamp(4200 / Math.max(d, 1), 60, 220) : tg.spec.mini ? U.clamp(1000 / Math.max(d, 1), 20, 60) : U.clamp(1400 / Math.max(d, 1), 26, 90);
+          m.hidden = false; m.className = "tmark" + (tg.spec.ace ? " ace" : tg.spec.boss ? " boss" : "");
           m.style.transform = "translate(" + Math.round(p.x) + "px," + Math.round(p.y) + "px)";
           m.style.setProperty("--s", size + "px");
           m.lastChild.textContent = Math.round(d) + " m";

@@ -24,6 +24,9 @@ globalThis.DR = globalThis.DR || {};
     HopLobby.progress(0.3, "Raising the mountains");
     await tick();
     G.T.mountain = DR.Track.build("mountain");
+    HopLobby.progress(0.38, "Sweeping the dunes");
+    await tick();
+    G.T.dunes = DR.Track.build("dunes");
     HopLobby.progress(0.45, "Arming the targets");
     await tick();
     DR.View.init($("view"));
@@ -49,7 +52,7 @@ globalThis.DR = globalThis.DR || {};
       left: function (name) { DR.Hud.toast(DR.Hud.t("leftRace", { name: name })); }
     });
     if (DR.Net.isClient()) DR.Hud.waiting(DR.Hud.t("waitHost"));
-    else if (G.autopilot || qs.has("course")) startRound(qs.get("course") === "mountain" ? "mountain" : "city");
+    else if (G.autopilot || qs.has("course")) startRound(DR.Track.COURSES.indexOf(qs.get("course")) >= 0 ? qs.get("course") : "city");
     else DR.Hud.menu(true);
 
     HopLobby.on("pause", function () { DR.Input.hold(true); if (!DR.Net.online()) G.paused = true; });
@@ -58,6 +61,8 @@ globalThis.DR = globalThis.DR || {};
     if (ctx.standalone) $("status").textContent = "Standalone: open this from a HopLobby lobby (Dev Mode) to hunt with up to 8 players.";
     wireButtons();
     DR.Input.onKey = onKey;
+    DR.Input.onPad = function () { DR.Hud.toast(DR.Hud.t("pad")); $("padKeys").hidden = false; };
+    if (DR.Input.pad) $("padKeys").hidden = false;
     HopLobby.progress(1, "Ready");
     HopLobby.ready();
     G.last = performance.now() / 1000;
@@ -129,6 +134,7 @@ globalThis.DR = globalThis.DR || {};
     const now = ms / 1000;
     const dt = Math.min(0.1, now - G.last);
     G.last = now;
+    DR.Input.poll();
     advance(dt);
     DR.View.frame(dt, now);
     DR.Hud.frame(G.S, DR.View.shot, DR.Net);
@@ -170,13 +176,17 @@ globalThis.DR = globalThis.DR || {};
     S.events.forEach(function (e) {
       if (e.k === "fire") { if (!fired) A.play("fire"); fired = true; }
       else if (e.k === "thit") { A.play("thit"); H.hit(false); V.spark(e.x, e.y, e.z); }
+      else if (e.k === "kill" && e.boss) { A.play("bossdown"); H.hit(true); H.points(H.t("bossDown", { n: e.pts }), "boss"); V.boom(e.x, e.y, e.z, 2); V.shake = 1.5; DR.Input.rumble(500, 1); }
       else if (e.k === "kill") { A.play(e.ace ? "ace" : "kill"); H.hit(true); H.points(e.ace ? H.t("ace") : H.t("kill"), e.ace); V.boom(e.x, e.y, e.z, e.ace); }
+      else if (e.k === "boss") { A.play("boss"); H.flash(H.t("bossIn", { name: e.name }), "warn", 2.6); }
+      else if (e.k === "mini") { if (me && Math.hypot(e.x - me.x, e.z - me.z) < 120) A.play("mini"); }
+      else if (e.k === "troll") A.play("troll");
       else if (e.k === "spark") V.spark(e.x, e.y, e.z);
       else if (e.k === "efire") { if (me && Math.hypot(e.x - me.x, e.z - me.z) < 70) A.play("efire"); }
-      else if (e.k === "ouch") { A.play("ouch"); V.shake = 1; }
-      else if (e.k === "down") { A.play("down"); if (me) V.boom(me.x, me.y, me.z, false); }
+      else if (e.k === "ouch") { A.play("ouch"); V.shake = 1; DR.Input.rumble(160, 0.6); }
+      else if (e.k === "down") { A.play("down"); if (me) V.boom(me.x, me.y, me.z, false); DR.Input.rumble(600, 1); }
       else if (e.k === "respawn") A.play("respawn");
-      else if (e.k === "crash") { A.play("crash"); V.shake = 1.2; H.flash(H.t("crash", { what: H.t("ob_" + e.kind.replace(" ", "_")) || e.kind, n: e.dmg }), "warn", 1.3); }
+      else if (e.k === "crash") { A.play("crash"); V.shake = 1.2; DR.Input.rumble(220, 0.9); H.flash(H.t("crash", { what: H.t("ob_" + e.kind.replace(" ", "_")) || e.kind, n: e.dmg }), "warn", 1.3); }
       else if (e.k === "trick") A.play(e.t === "flip" ? "flip" : "roll");
       else if (e.k === "dodge") { A.play("dodge"); H.points(H.t("dodged"), false); }
       else if (e.k === "over") { A.play("over"); H.flash(H.t("over"), "info", 1.4); }

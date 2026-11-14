@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hop Drone Hunt</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23ff2d4a'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23fff'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 <canvas id="view" aria-label="Game view"></canvas>
@@ -25,6 +25,7 @@
     <div id="board"></div>
   </div>
   <div id="clock">3:00</div>
+  <div id="boss" hidden><b id="bossName"></b><div><i id="bossFill"></i></div></div>
   <div id="hp"><div id="hpBar"><div id="hpFill"></div></div><span id="hpNum">100</span></div>
   <canvas id="minimap" width="170" height="170"></canvas>
   <div id="marks"></div>
@@ -48,9 +49,11 @@
   <div class="panel">
     <h2 id="pickTitle">PICK A COURSE</h2>
     <div class="cards">
-      <button type="button" class="card city" data-course="city"><b>City</b><small></small></button>
-      <button type="button" class="card mountain" data-course="mountain"><b>Mountain</b><small></small></button>
+      <button type="button" class="card city" data-course="city"><b>City</b><small></small><em></em></button>
+      <button type="button" class="card mountain" data-course="mountain"><b>Mountain</b><small></small><em></em></button>
+      <button type="button" class="card dunes" data-course="dunes"><b>Dunes</b><small></small><em></em></button>
     </div>
+    <p id="padKeys" hidden></p>
   </div>
 </div>
 
@@ -62,6 +65,7 @@
       <div id="resPick">
         <button type="button" class="small" data-course="city"><b>HUNT AGAIN · City</b></button>
         <button type="button" class="small" data-course="mountain"><b>HUNT AGAIN · Mountain</b></button>
+        <button type="button" class="small" data-course="dunes"><b>HUNT AGAIN · Dunes</b></button>
       </div>
       <p id="resWait" hidden></p>
       <button type="button" id="endAll" class="quiet" hidden>END GAME FOR EVERYONE</button>
@@ -86,9 +90,9 @@
    retried if the network drops it; then they run in this order. hoplobby.js is
    an unchanged copy of HopLobby SDK v1, so standalone mode also works offline. */
 (function () {
-  var FILES = ["hoplobby.js", "vendor/three.min.js", "vendor/GLTFLoader.js", "src/util.js?v=3", "src/track.js?v=3", "src/sim.js?v=3",
-    "src/net.js?v=3", "src/world.js?v=3", "src/drone.js?v=3", "src/pilot.js?v=3", "src/view.js?v=3", "src/audio.js?v=3",
-    "src/input.js?v=3", "src/hud.js?v=3", "src/main.js?v=3"];
+  var FILES = ["hoplobby.js", "vendor/three.min.js", "vendor/GLTFLoader.js", "src/util.js?v=4", "src/track.js?v=4", "src/sim.js?v=4",
+    "src/net.js?v=4", "src/world.js?v=4", "src/drone.js?v=4", "src/pilot.js?v=4", "src/view.js?v=4", "src/audio.js?v=4",
+    "src/input.js?v=4", "src/hud.js?v=4", "src/main.js?v=4"];
   function fail(src) {
     var el = document.getElementById("err");
     el.hidden = false;
