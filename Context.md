@@ -7,6 +7,27 @@ and hosted on my own https address.
 
 ## Current status
 
+- **2026-11-14: the user's five notes + controller support BUILT** (f7c39c7; notes in `Notes/2026-11-14-next-changes.md`).
+  - **Targets barrel-roll** out of the way of a shot about to land (60% of the time, 2.8 s cooldown, aces 1.9 s;
+    `tRoll*` in `CFG`). **Faster from the start:** targets 23.5-28.5 m/s (aces 28-33) against your 30, six alive
+    at once, spawned 70 m ahead, first shots within a second or two.
+  - **Third map: Dunes** (`track.js` buildDunes, `world.js` dunes): dune sea, pyramids with gold caps, paired
+    obelisks along the line, ruined columns, palms, an oasis pool. All solid.
+  - **A red-eyed boss per map** (`DR.BOSS`, sim.js; models in drone.js): City = Big Tech CEO at a podium on an
+    executive drone (mini drones: phones); Mountain = Evil Santa in a sleigh drone (gift boxes); Dunes = Mummy
+    Pharaoh in a flying sarcophagus (scarabs; user picked him). Arrives 40 s in, 80 HP, +15, fires bursts of
+    three, lets loose 3 one-hit mini drones every 6.5 s (max 6, +1 each), comes back 40 s after going down.
+    Local per pilot like the pack, so no lag. Boss name + health bar at the top.
+  - **Clearer picture:** fog pushed far back, stronger sun, wall textures drawn at 4x with full anisotropy,
+    pixel ratio up to 2x (auto-quality still steps it down when the frame rate drops).
+  - **Controller** (input.js; the HopLobby docs say nothing against it): left stick fly, RT/A fire, LT/B brake,
+    LB/RB roll, Y flip, X camera, D-pad up sensor, D-pad down invert, Back sound; D-pad/stick + A in the menus;
+    rumble on hits. Start is left alone (HopLobby's menu). **Not tested with a real pad, and whether HopLobby's
+    frame lets the Gamepad API through is unknown until tried in Dev Mode.**
+  - `node tools/sim-test.js` PASS on all three maps, `node tools/net-test.js` 17/17. Headless shots in
+    `Notes/shots/v4/` (05 is all three bosses side by side; `tools/boss-lineup.js` makes it).
+    Headless fps: dunes ~55, mountain ~46-55, city ~40. **Not hand-played.**
+
 - **2026-11-11: VISION CHANGED (user) → "Drone Hunt".** No more racing. Up to 8 pilots, 3-minute rounds on
   **City** (towers, streets) or **Mountain** (valley, col, gorge, snowy peaks), host picks. Each pilot chases
   their OWN pack of 60 target drones (same seed = same pack for everyone; every 10th is a gold "ace" worth 3)
