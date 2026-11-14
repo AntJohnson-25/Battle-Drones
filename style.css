@@ -1,4 +1,4 @@
-/* Hop Drone Hunt HUD. Rounded and bright; the bottom centre (about 60 px) stays
+/* Battle Drones HUD. Rounded and bright; the bottom centre (about 60 px) stays
    clear for HopLobby's pill. Readable at 1280x720. */
 :root {
   --ink: #f6f5ef; --panel: rgba(20, 24, 34, 0.72); --lime: #c4f35b; --hot: #ff2d4a; --gold: #ffc23a; --sky: #6ae0ff;

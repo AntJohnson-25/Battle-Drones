@@ -1,8 +1,8 @@
 {
-  "name": "hop-drone-racing",
+  "name": "battle-drones",
   "private": true,
-  "version": "0.2.0",
-  "description": "Hop Drone Racing, a multiplayer HopLobby game. FPV drone race with pickups.",
+  "version": "1.0.0",
+  "description": "Battle Drones, a multiplayer HopLobby game. A drone hunt for up to 8 pilots.",
   "scripts": {
     "dev": "npx --yes serve -l 5173 ."
   }
