@@ -7,6 +7,17 @@ and hosted on my own https address.
 
 ## Current status
 
+- **2026-11-14 (later): named "Battle Drones" (user), game id `battle-drones`; LIVE and ready to submit.**
+  Snowed-in mountain + snowfall, sound pass (stealth hum, louder shots, echo, left/right placement) done; user:
+  "looks and feels good". Repo https://github.com/AntJohnson-25/Battle-Drones (user created it; `main` = whole
+  project, `gh-pages` = `Work/`). Live at https://antjohnson-25.github.io/Battle-Drones/ (checked: loads, a round
+  runs, no errors). To update the live game: commit, `git push origin main`, then
+  `git subtree split --prefix Work -b gh-pages` and `git push origin gh-pages` (bump `?v=` in index.html first).
+  Submission package: `Submission/submission.json` (form fields, within the length limits) + `Submission/screenshots/`;
+  `HANDOFF.md` rewritten; `hoplobby.json` at the root. **Not yet submitted**: needs the HopLobby portal sign-in
+  (MCP prepare_submission saves a draft; the user presses Submit). Not yet tested from the https address in a
+  Dev Mode lobby with 2+ players, and the controller is unconfirmed inside HopLobby's frame.
+
 - **2026-11-14: the user's five notes + controller support BUILT** (f7c39c7; notes in `Notes/2026-11-14-next-changes.md`).
   - **Targets barrel-roll** out of the way of a shot about to land (60% of the time, 2.8 s cooldown, aces 1.9 s;
     `tRoll*` in `CFG`). **Faster from the start:** targets 23.5-28.5 m/s (aces 28-33) against your 30, six alive
