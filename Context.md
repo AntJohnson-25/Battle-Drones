@@ -7,6 +7,13 @@ and hosted on my own https address.
 
 ## Current status
 
+- **2026-11-14 (end of session): DRAFT saved on the portal, NOT submitted** (draft 13abfe45-6078-4d4e-9e77-7675db9a5498).
+  **Next action: compliance pass before Submit.** The live platform rules (SDK 1.7; read with the hoplobby MCP
+  `read_doc platform-rules`) are newer than `03-Resources/hoplobby-developer-docs` and the game breaks them:
+  own course picker (must be a lobby option), own results / HUNT AGAIN loop (host must call `endGame(results)`),
+  no `HopLobby.graphics` presets (Potato to Ultra), settings and key list not in `HopLobby.menu.set()`, bundled
+  `hoplobby.js` older than 1.7, packaging rules unchecked. Offered to the user; not started.
+
 - **2026-11-14 (later): named "Battle Drones" (user), game id `battle-drones`; LIVE and ready to submit.**
   Snowed-in mountain + snowfall, sound pass (stealth hum, louder shots, echo, left/right placement) done; user:
   "looks and feels good". Repo https://github.com/AntJohnson-25/Battle-Drones (user created it; `main` = whole
