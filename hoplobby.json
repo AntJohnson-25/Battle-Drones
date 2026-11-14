@@ -1,0 +1,14 @@
+{
+  "title": "Battle Drones",
+  "gameId": "battle-drones",
+  "minPlayers": 1,
+  "maxPlayers": 8,
+  "lateJoin": true,
+  "options": [],
+  "leaderboards": [],
+  "achievements": [],
+  "store": [],
+  "build": {
+    "output": "Work"
+  }
+}
