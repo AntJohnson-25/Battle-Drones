@@ -10,7 +10,7 @@ globalThis.DR = globalThis.DR || {};
 
   const LOOK = {
     city: { skyTop: 0x3566d6, horizon: 0xffc8a0, fog: 0xe6c6b2, fogNear: 260, fogFar: 980, hemiG: 0x5b5f6e, sun: 0xffe2c0 },
-    mountain: { skyTop: 0x3f8ff5, horizon: 0xe8f1ff, fog: 0xdfe9f5, fogNear: 320, fogFar: 1100, hemiG: 0x6b8f4e, sun: 0xfff1d6 },
+    mountain: { skyTop: 0x5a86c8, horizon: 0xeef3fb, fog: 0xe6edf7, fogNear: 240, fogFar: 950, hemiG: 0xb4c4de, sun: 0xfff4e6 },
     dunes: { skyTop: 0x2f86e6, horizon: 0xffe3b0, fog: 0xf3dcae, fogNear: 300, fogFar: 1050, hemiG: 0xb98a4a, sun: 0xfff0cc }
   };
   W.LOOK = LOOK;
@@ -52,6 +52,41 @@ globalThis.DR = globalThis.DR || {};
     W.sky.material.uniforms.bottom.value.setHex(L.horizon);
     W.hemi.groundColor.setHex(L.hemiG);
     W.sun.color.setHex(L.sun);
+    if (!W.snow) { W.snow = snowfall(); W.scene.add(W.snow); }
+    W.snow.visible = T.course === "mountain";
+  };
+
+  // Light snowfall on the mountain: a box of flakes that stays round the camera,
+  // each one drifting down and wrapping back to the top.
+  const SNOW = { n: 900, w: 90, h: 50 };
+  function snowfall() {
+    const pos = new Float32Array(SNOW.n * 3), r = U.rng(31);
+    for (let i = 0; i < SNOW.n; i++) { pos[i * 3] = r() * SNOW.w; pos[i * 3 + 1] = r() * SNOW.h; pos[i * 3 + 2] = r() * SNOW.w; }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    const c = document.createElement("canvas"); c.width = c.height = 32;
+    const x = c.getContext("2d"), g = x.createRadialGradient(16, 16, 0, 16, 16, 16);
+    g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(0.5, "rgba(255,255,255,0.7)"); g.addColorStop(1, "rgba(255,255,255,0)");
+    x.fillStyle = g; x.fillRect(0, 0, 32, 32);
+    const mat = new THREE.PointsMaterial({ map: new THREE.CanvasTexture(c), size: 0.34, transparent: true, opacity: 0.85, depthWrite: false, fog: false });
+    mat.onBeforeCompile = function (sh) {
+      // Wrap each flake into the box round the camera, in the shader: no per-frame uploads.
+      sh.uniforms.uOff = W.snowOff = { value: new THREE.Vector3() };
+      sh.uniforms.uCam = W.snowCam = { value: new THREE.Vector3() };
+      sh.vertexShader = "uniform vec3 uOff; uniform vec3 uCam;\n" + sh.vertexShader.replace("#include <begin_vertex>",
+        "vec3 transformed = mod(position + uOff - uCam, vec3(" + SNOW.w.toFixed(1) + ", " + SNOW.h.toFixed(1) + ", " + SNOW.w.toFixed(1) + ")) - vec3(" + (SNOW.w / 2).toFixed(1) + ", " + (SNOW.h / 2).toFixed(1) + ", " + (SNOW.w / 2).toFixed(1) + ") + uCam;");
+    };
+    const p = new THREE.Points(geo, mat);
+    p.frustumCulled = false;
+    p.renderOrder = 3;
+    return p;
+  }
+  let snowT = 0;
+  W.tick = function (dt, cam) {
+    if (!W.snow || !W.snow.visible || !W.snowOff) return;
+    snowT += dt;
+    W.snowOff.value.set(Math.sin(snowT * 0.3) * 4 + snowT * 1.2, -snowT * 4.5, snowT * 0.6);
+    W.snowCam.value.copy(cam);
   };
 
   function sky() {
@@ -329,7 +364,8 @@ globalThis.DR = globalThis.DR || {};
   }
 
   // ------------------------------------------------------------------ mountain
-  const MPAL = { grass: 0x8fd16a, grassDark: 0x79bf58, hill: 0x5f9b48, olive: 0x8aa05a, rock: 0x9c8a78, snow: 0xf4f7fb, trunk: 0x7a4f35, pine: 0x2f6b3c, pine2: 0x3f8048 };
+  // Snowed in from the valley floor to the peaks: only steep rock shows through.
+  const MPAL = { grass: 0xf6f9fd, grassDark: 0xe6eef8, hill: 0xeef3fa, olive: 0xdfe8f4, rock: 0x7f7a80, snow: 0xffffff, trunk: 0x5e4030, pine: 0x24553a, pine2: 0x2f6646 };
   function mountain(group, T) {
     const G = T.terrainGrid, n = G.n, N1 = n + 1;
     const pos = new Float32Array(N1 * N1 * 3), col = new Float32Array(N1 * N1 * 3);
@@ -344,7 +380,7 @@ globalThis.DR = globalThis.DR || {};
       if (d < 24 && h < 40) c.setHex(((ix + iz) & 1) ? MPAL.grass : MPAL.grassDark);
       else {
         c.setHex(MPAL.hill).lerp(cB.setHex(MPAL.olive), U.clamp((h - 15) / 45, 0, 1));
-        if (slope > 0.5) c.lerp(cB.setHex(MPAL.rock), U.clamp((slope - 0.5) * 2.2, 0, 1));
+        if (slope > 0.75) c.lerp(cB.setHex(MPAL.rock), U.clamp((slope - 0.75) * 2.4, 0, 0.9));
         if (h > 95) c.lerp(cB.setHex(MPAL.snow), U.clamp((h - 95) / 25, 0, 1));
       }
       const j = 0.94 + rng() * 0.1;
@@ -370,10 +406,14 @@ globalThis.DR = globalThis.DR || {};
     const leafGeo = new THREE.ConeGeometry(2.4, 9, 6); leafGeo.translate(0, 7, 0);
     const trunk = new THREE.InstancedMesh(trunkGeo, lambert(MPAL.trunk), trees.length);
     const leaf = new THREE.InstancedMesh(leafGeo, lambert(0xffffff), trees.length);
+    // Snow on the pines: a white cap over the top third and a skirt on the lower boughs.
+    const capGeo = W.mergeGeos([new THREE.ConeGeometry(1.05, 3.6, 6).translate(0, 9.85, 0), new THREE.ConeGeometry(2.55, 1.1, 6).translate(0, 3.2, 0)]);
+    const cap = new THREE.InstancedMesh(capGeo, lambert(0xffffff), trees.length);
+    group.add(cap); cap.frustumCulled = false;
     trees.forEach(function (t, i) {
       p.set(t[0], t[1] - 0.3, t[2]); s.set(t[3], t[3] * (0.9 + t[4] * 0.4), t[3]); q.setFromEuler(e.set(0, t[4] * 6, 0));
       m4.compose(p, q, s);
-      trunk.setMatrixAt(i, m4); leaf.setMatrixAt(i, m4);
+      trunk.setMatrixAt(i, m4); leaf.setMatrixAt(i, m4); cap.setMatrixAt(i, m4);
       leaf.setColorAt(i, c.setHex(t[4] < 0.5 ? MPAL.pine : MPAL.pine2));
     });
     const rock = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), lambert(MPAL.rock), rocks.length);

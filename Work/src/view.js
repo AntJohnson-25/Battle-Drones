@@ -380,6 +380,7 @@ globalThis.DR = globalThis.DR || {};
         V.camera.updateProjectionMatrix();
       }
     }
+    DR.World.tick(dt, V.camera.position);
     V.renderer.render(V.scene, V.camera);
     autoQuality(dt);
   };
