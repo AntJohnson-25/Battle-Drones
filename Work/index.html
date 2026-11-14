@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hop Drone Hunt</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23ff2d4a'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23fff'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 <canvas id="view" aria-label="Game view"></canvas>
@@ -90,9 +90,9 @@
    retried if the network drops it; then they run in this order. hoplobby.js is
    an unchanged copy of HopLobby SDK v1, so standalone mode also works offline. */
 (function () {
-  var FILES = ["hoplobby.js", "vendor/three.min.js", "vendor/GLTFLoader.js", "src/util.js?v=5", "src/track.js?v=5", "src/sim.js?v=5",
-    "src/net.js?v=5", "src/world.js?v=5", "src/drone.js?v=5", "src/pilot.js?v=5", "src/view.js?v=5", "src/audio.js?v=5",
-    "src/input.js?v=5", "src/hud.js?v=5", "src/main.js?v=5"];
+  var FILES = ["hoplobby.js", "vendor/three.min.js", "vendor/GLTFLoader.js", "src/util.js?v=6", "src/track.js?v=6", "src/sim.js?v=6",
+    "src/net.js?v=6", "src/world.js?v=6", "src/drone.js?v=6", "src/pilot.js?v=6", "src/view.js?v=6", "src/audio.js?v=6",
+    "src/input.js?v=6", "src/hud.js?v=6", "src/main.js?v=6"];
   function fail(src) {
     var el = document.getElementById("err");
     el.hidden = false;

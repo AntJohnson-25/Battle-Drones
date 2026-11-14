@@ -173,16 +173,23 @@ globalThis.DR = globalThis.DR || {};
   function react(S) {
     const me = S.me(), H = DR.Hud, A = DR.Audio, V = DR.View;
     let fired = false;
+    // Where a sound is, from the cockpit: left or right, and quieter with distance.
+    const U = DR.U;
+    function at(name, e, range) {
+      if (!me) { A.play(name); return; }
+      const dx = e.x - me.x, dz = e.z - me.z, d = Math.hypot(dx, dz) || 1;
+      A.play(name, (dx * -U.fwdZ(me.yaw) + dz * U.fwdX(me.yaw)) / d * 0.8, Math.max(0.25, 1 - d / range));
+    }
     S.events.forEach(function (e) {
       if (e.k === "fire") { if (!fired) A.play("fire"); fired = true; }
-      else if (e.k === "thit") { A.play("thit"); H.hit(false); V.spark(e.x, e.y, e.z); }
-      else if (e.k === "kill" && e.boss) { A.play("bossdown"); H.hit(true); H.points(H.t("bossDown", { n: e.pts }), "boss"); V.boom(e.x, e.y, e.z, 2); V.shake = 1.5; DR.Input.rumble(500, 1); }
-      else if (e.k === "kill") { A.play(e.ace ? "ace" : "kill"); H.hit(true); H.points(e.ace ? H.t("ace") : H.t("kill"), e.ace); V.boom(e.x, e.y, e.z, e.ace); }
+      else if (e.k === "thit") { at("thit", e, 400); H.hit(false); V.spark(e.x, e.y, e.z); }
+      else if (e.k === "kill" && e.boss) { at("bossdown", e, 600); H.hit(true); H.points(H.t("bossDown", { n: e.pts }), "boss"); V.boom(e.x, e.y, e.z, 2); V.shake = 1.5; DR.Input.rumble(500, 1); }
+      else if (e.k === "kill") { at(e.ace ? "ace" : "kill", e, 380); H.hit(true); H.points(e.ace ? H.t("ace") : H.t("kill"), e.ace); V.boom(e.x, e.y, e.z, e.ace); }
       else if (e.k === "boss") { A.play("boss"); H.flash(H.t("bossIn", { name: e.name }), "warn", 2.6); }
-      else if (e.k === "mini") { if (me && Math.hypot(e.x - me.x, e.z - me.z) < 120) A.play("mini"); }
+      else if (e.k === "mini") { if (me && Math.hypot(e.x - me.x, e.z - me.z) < 120) at("mini", e, 200); }
       else if (e.k === "troll") A.play("troll");
       else if (e.k === "spark") V.spark(e.x, e.y, e.z);
-      else if (e.k === "efire") { if (me && Math.hypot(e.x - me.x, e.z - me.z) < 70) A.play("efire"); }
+      else if (e.k === "efire") { if (me && Math.hypot(e.x - me.x, e.z - me.z) < 90) at("efire", e, 130); }
       else if (e.k === "ouch") { A.play("ouch"); V.shake = 1; DR.Input.rumble(160, 0.6); }
       else if (e.k === "down") { A.play("down"); if (me) V.boom(me.x, me.y, me.z, false); DR.Input.rumble(600, 1); }
       else if (e.k === "respawn") A.play("respawn");
