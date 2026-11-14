@@ -12,7 +12,7 @@ globalThis.DR = globalThis.DR || {};
     en: {
       go: "HUNT!", wrong: "WRONG WAY", pts: "PTS", left: "left", leftN: "{n} targets left", none: "Pack cleared!",
       waitHost: "Waiting for the host to pick a course…", waitNext: "Waiting for the host to start the next round…",
-      pick: "PICK A COURSE", city: "City", mountain: "Mountain", cityD: "Weave between the towers", mountainD: "Valleys, a high col and a gorge",
+      pick: "PICK A COURSE", city: "City", mountain: "Mountain", cityD: "Weave between the towers", mountainD: "Snowed-in valleys, a high col and a gorge",
       dunes: "Dunes", dunesD: "Pyramids, obelisks and an oasis",
       cityB: "Boss: Big Tech CEO", mountainB: "Boss: Evil Santa", dunesB: "Boss: Mummy Pharaoh",
       bossIn: "BOSS: {name}", bossDown: "+{n} BOSS DOWN!", mini: "+1", ob_dune: "DUNE", ob_obelisk: "OBELISK", ob_column: "COLUMN", ob_palm: "PALM",
@@ -31,7 +31,7 @@ globalThis.DR = globalThis.DR || {};
     "pt-PT": {
       go: "CAÇA!", wrong: "SENTIDO ERRADO", pts: "PTS", left: "saiu", leftN: "faltam {n} alvos", none: "Bando abatido!",
       waitHost: "À espera que o anfitrião escolha o percurso…", waitNext: "À espera que o anfitrião comece a próxima ronda…",
-      pick: "ESCOLHE O PERCURSO", city: "Cidade", mountain: "Montanha", cityD: "Ziguezague entre as torres", mountainD: "Vales, um colo alto e uma garganta",
+      pick: "ESCOLHE O PERCURSO", city: "Cidade", mountain: "Montanha", cityD: "Ziguezague entre as torres", mountainD: "Vales nevados, um colo alto e uma garganta",
       dunes: "Dunas", dunesD: "Pirâmides, obeliscos e um oásis",
       cityB: "Chefe: CEO das Big Tech", mountainB: "Chefe: Pai Natal Malvado", dunesB: "Chefe: Faraó Múmia",
       bossIn: "CHEFE: {name}", bossDown: "+{n} CHEFE ABATIDO!", mini: "+1", ob_dune: "DUNA", ob_obelisk: "OBELISCO", ob_column: "COLUNA", ob_palm: "PALMEIRA",
