@@ -9,9 +9,11 @@ globalThis.DR = globalThis.DR || {};
   const V = { mode: "fpv", drones: [], pilots: [], quality: 1, targets: {}, shake: 0 };
 
   V.init = function (canvas) {
-    const r = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: "high-performance" });
-    // Full native sharpness (up to 2x); autoQuality steps it down if the frame rate suffers.
-    V.pr = Math.min(window.devicePixelRatio || 1, 2);
+    const g0 = (typeof HopLobby !== "undefined" && HopLobby.graphics) || null;
+    V.gfx = g0 || { level: "high", auto: true, pixelRatio: 1.5, antialias: true, effects: true, particles: 1, drawDistance: 1 };
+    const r = new THREE.WebGLRenderer({ canvas: canvas, antialias: V.gfx.antialias !== false, powerPreference: "high-performance" });
+    // The player's graphics preset caps the sharpness; on Auto, autoQuality may step it down further.
+    V.pr = Math.min(window.devicePixelRatio || 1, V.gfx.pixelRatio || 1.5);
     r.setPixelRatio(V.pr);
     DR.World.aniso = r.capabilities.getMaxAnisotropy();
     r.setSize(innerWidth, innerHeight, false);
@@ -26,17 +28,34 @@ globalThis.DR = globalThis.DR || {};
     addEventListener("resize", resize);
     resize();
   };
+  // HopLobby graphics preset (potato .. ultra): sharpness, draw distance, debris, snow.
+  V.applyGraphics = function (g) {
+    if (!g) return;
+    V.gfx = g;
+    V.pr = Math.min(window.devicePixelRatio || 1, g.pixelRatio || 1);
+    if (V.renderer) { V.renderer.setPixelRatio(V.pr); resize(); }
+    const dd = U.clamp(g.drawDistance || 1, 0.3, 1);
+    if (V.camera) { V.camera.far = 1500 * dd; V.camera.updateProjectionMatrix(); }
+    if (V.scene && V.scene.fog && V.fogBase) { V.scene.fog.near = V.fogBase[0] * dd; V.scene.fog.far = V.fogBase[1] * dd; }
+    V.maxBits = Math.round(80 * U.clamp(g.particles || 1, 0.1, 1));
+    if (DR.World.snow) DR.World.snow.geometry.setDrawRange(0, Math.round(900 * U.clamp(g.particles || 1, 0.1, 1)));
+  };
   function resize() {
     V.renderer.setSize(innerWidth, innerHeight, false);
     V.camera.aspect = innerWidth / innerHeight;
     V.camera.updateProjectionMatrix();
   }
   // Before the first round: show a course behind the menu.
-  V.preview = function (T) { DR.World.show(T); V.T = T; };
+  V.preview = function (T) { showWorld(T); V.T = T; };
+  function showWorld(T) {
+    DR.World.show(T);
+    V.fogBase = [V.scene.fog.near, V.scene.fog.far];
+    V.applyGraphics(V.gfx);
+  }
 
   V.setRace = function (S) {
     V.S = S; V.T = S.T;
-    DR.World.show(S.T);
+    showWorld(S.T);
     V.drones.forEach(function (d) { V.scene.remove(d.root); V.scene.remove(d.blob); });
     V.pilots.forEach(function (p) { if (p && p.root.parent) p.root.parent.remove(p.root); });
     V.T = S.T;
@@ -172,6 +191,7 @@ globalThis.DR = globalThis.DR || {};
     const s = V.booms.find(function (b) { return b.userData.t > 0.7; }) || V.booms[0];
     s.position.set(x, y, z); s.userData.t = 0; s.userData.size = big === 2 ? 30 : big ? 13 : 8; s.visible = true;
     let n = big === 2 ? 40 : big ? 14 : 9;
+    n = Math.max(2, Math.round(n * (V.maxBits || 80) / 80));
     V.bits.forEach(function (b) {
       if (n <= 0 || b.userData.t < 1.4) return;
       n--;
@@ -390,7 +410,7 @@ globalThis.DR = globalThis.DR || {};
     const flying = V.shot === "fpv" || V.shot === "chase" || V.shot === "down";
     if (!flying || dt > 0.2) return;
     qT += dt; qFrames++;
-    if (qT < 4) return;
+    if (qT < 4 || (V.gfx && V.gfx.auto === false)) return;   // only step down on Auto
     const fps = qFrames / qT;
     qT = 0; qFrames = 0;
     V.fps = fps;

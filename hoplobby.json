@@ -4,7 +4,15 @@
   "minPlayers": 1,
   "maxPlayers": 8,
   "lateJoin": true,
-  "options": [],
+  "options": [
+    { "key": "course", "label": { "en": "Course", "pt-PT": "Percurso" }, "type": "choice", "default": "city",
+      "choices": [
+        { "value": "city", "label": { "en": "City", "pt-PT": "Cidade" } },
+        { "value": "mountain", "label": { "en": "Mountain", "pt-PT": "Montanha" } },
+        { "value": "dunes", "label": { "en": "Dunes", "pt-PT": "Dunas" } },
+        { "value": "random", "label": { "en": "Random", "pt-PT": "Aleatório" } }
+      ] }
+  ],
   "leaderboards": [],
   "achievements": [],
   "store": [],

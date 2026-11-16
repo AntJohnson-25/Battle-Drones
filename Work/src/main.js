@@ -13,11 +13,63 @@ globalThis.DR = globalThis.DR || {};
   const wait = function (ms) { return new Promise(function (ok) { setTimeout(ok, ms); }); };
   const $ = function (id) { return document.getElementById(id); };
 
+  // The host's pick in HopLobby's Match settings (same list as hoplobby.json "options").
+  DR.LOBBY_OPTIONS = [
+    { key: "course", label: { en: "Course", "pt-PT": "Percurso" }, type: "choice", default: "city",
+      choices: [
+        { value: "city", label: { en: "City", "pt-PT": "Cidade" } },
+        { value: "mountain", label: { en: "Mountain", "pt-PT": "Montanha" } },
+        { value: "dunes", label: { en: "Dunes", "pt-PT": "Dunas" } },
+        { value: "random", label: { en: "Random", "pt-PT": "Aleatório" } }
+      ] }
+  ];
+  // Each player's own settings and the key list, in HopLobby's Esc menu.
+  DR.MENU = {
+    settings: [
+      { key: "steering", label: { en: "Steering sensitivity", "pt-PT": "Sensibilidade da direção" }, type: "choice", default: 0.8, section: "controls",
+        choices: [
+          { value: 0.6, label: { en: "Gentle", "pt-PT": "Suave" } },
+          { value: 0.8, label: { en: "Smooth", "pt-PT": "Fluida" } },
+          { value: 1, label: { en: "Normal", "pt-PT": "Normal" } },
+          { value: 1.25, label: { en: "Twitchy", "pt-PT": "Rápida" } }
+        ] },
+      { key: "invertClimb", label: { en: "Invert climb", "pt-PT": "Inverter subida" }, type: "toggle", default: false, section: "controls" },
+      { key: "camera", label: { en: "Camera", "pt-PT": "Câmara" }, type: "choice", default: "fpv",
+        choices: [{ value: "fpv", label: "FPV" }, { value: "chase", label: { en: "Chase", "pt-PT": "Perseguição" } }] },
+      { key: "sensor", label: { en: "Obstacle sensor beeps", "pt-PT": "Sensor de obstáculos" }, type: "toggle", default: false }
+    ],
+    controls: [
+      { title: "Flying", keys: [
+        { keys: ["←", "→", "A", "D"], action: "Steer" },
+        { keys: ["↑", "↓", "W", "S"], action: "Climb / dive" },
+        { keys: ["Shift"], action: "Brake (tighter turns)" },
+        { keys: ["Q", "E"], action: "Barrel roll (dodge)" },
+        { keys: ["X"], action: "Flip (dodge)" }
+      ] },
+      { title: "Hunting", keys: [
+        { keys: ["Space", "J"], action: "Fire (hold)" },
+        { keys: ["C"], action: "FPV / chase camera" },
+        { keys: ["O"], action: "Obstacle sensor" },
+        { keys: ["I"], action: "Invert climb" },
+        { keys: ["M"], action: "Sound on / off" }
+      ] },
+      { title: "Controller", keys: [
+        { keys: ["Left stick"], action: "Steer, climb / dive" },
+        { keys: ["RT", "A"], action: "Fire" },
+        { keys: ["LT", "B"], action: "Brake" },
+        { keys: ["LB", "RB"], action: "Barrel roll" },
+        { keys: ["Y"], action: "Flip" }
+      ] }
+    ],
+    shared: ["graphics", "audio", "shake"]
+  };
+
   async function boot() {
     HopLobby.progress(0.05, "Joining the lobby");
     let ctx;
-    try { ctx = await HopLobby.init(); } catch (e) { fatal(e.message); return; }
+    try { ctx = await HopLobby.init({ lobbyOptions: DR.LOBBY_OPTIONS }); } catch (e) { fatal(e.message); return; }
     G.myId = ctx.playerId;
+    G.course = pickCourse((ctx.options || HopLobby.options || {}).course);
     HopLobby.progress(0.15, "Building the city");
     await tick();
     G.T.city = DR.Track.build("city");
@@ -48,14 +100,21 @@ globalThis.DR = globalThis.DR || {};
         DR.Net.attach(S);
         setRace(S);
       },
-      promoted: function () { DR.Hud.toast(DR.Hud.t("host")); DR.Hud.last.res = null; if (!G.S) DR.Hud.menu(true); },
+      promoted: function () {
+        DR.Hud.toast(DR.Hud.t("host")); DR.Hud.last.res = null;
+        if (!G.S) startRound(G.course);
+        else if (G.S.over) endRound();     // the old host left before ending it: we do
+      },
       left: function (name) { DR.Hud.toast(DR.Hud.t("leftRace", { name: name })); }
     });
-    if (DR.Net.isClient()) DR.Hud.waiting(DR.Hud.t("waitHost"));
-    else if (G.autopilot || qs.has("course")) startRound(DR.Track.COURSES.indexOf(qs.get("course")) >= 0 ? qs.get("course") : "city");
-    else DR.Hud.menu(true);
+    if (qs.has("course")) G.course = pickCourse(qs.get("course"));
 
     HopLobby.on("pause", function () { DR.Input.hold(true); if (!DR.Net.online()) G.paused = true; });
+    HopLobby.on("graphics", function (g) { DR.View.applyGraphics(g); });
+    try {
+      applyPrefs(await HopLobby.menu.set(DR.MENU));
+    } catch (e) { /* the menu is HopLobby's: play on with the defaults */ }
+    HopLobby.on("prefs", applyPrefs);
     HopLobby.on("resume", function () { DR.Input.hold(false); G.paused = false; });
     HopLobby.on("relay", function (s) { $("status").textContent = s === "open" ? "" : s === "connecting" ? "Connecting…" : "Reconnecting…"; });
     if (ctx.standalone) $("status").textContent = "Standalone: open this from a HopLobby lobby (Dev Mode) to hunt with up to 8 players.";
@@ -65,12 +124,49 @@ globalThis.DR = globalThis.DR || {};
     if (DR.Input.pad) $("padKeys").hidden = false;
     HopLobby.progress(1, "Ready");
     HopLobby.ready();
+    // HopLobby already ran the lobby, Ready and countdown: the host starts the hunt
+    // straight away on the course picked in Match settings; everyone else gets it from them.
+    if (DR.Net.isClient()) DR.Hud.waiting(DR.Hud.t("waitHost"));
+    else startRound(G.course);
     G.last = performance.now() / 1000;
     requestAnimationFrame(frame);
     hiddenTicker();
   }
 
   function fatal(msg) { const el = $("err"); el.hidden = false; el.textContent = msg; }
+
+  function pickCourse(c) {
+    if (c === "random") return DR.Track.COURSES[Math.floor(Math.random() * DR.Track.COURSES.length)];
+    return DR.Track.COURSES.indexOf(c) >= 0 ? c : "city";
+  }
+
+  // Personal settings from HopLobby's Esc menu.
+  function applyPrefs(p) {
+    if (!p) return;
+    const s = Number(p.steering);
+    if (s >= 0.4 && s <= 1.6) DR.Input.sens = s;
+    if (typeof p.invertClimb === "boolean" && p.invertClimb !== DR.Input.invert) DR.Input.toggleInvert();
+    if (typeof p.sensor === "boolean") DR.Hud.sensor = p.sensor;
+    if ((p.camera === "fpv" || p.camera === "chase") && DR.View.mode !== p.camera) DR.View.toggleCamera();
+  }
+
+  // Round over: the host hands the scores to HopLobby (results screen + rematch).
+  // A few seconds first so everyone's final score lands.
+  function endRound() {
+    if (G.ended || DR.Net.isClient()) return;
+    G.ended = true;
+    setTimeout(function () {
+      const S = G.S;
+      const res = DR.Sim.rank(S);
+      const entries = [];
+      res.forEach(function (x, i) {
+        const r = S.racers[x.id];
+        if (!r.hl || r.left) return;
+        entries.push({ playerId: r.hl, place: i + 1, score: r.score, label: r.score + " pts" });
+      });
+      try { HopLobby.endGame({ title: DR.Hud.t(S.T.course), entries: entries }); } catch (e) { /* standalone */ }
+    }, 5000);
+  }
 
   function startRound(course) {
     if (DR.Net.isClient()) return;
@@ -100,16 +196,11 @@ globalThis.DR = globalThis.DR || {};
     else if (code === "KeyI") DR.Input.toggleInvert();
     else if (code === "KeyO") { DR.Hud.sensor = !DR.Hud.sensor; DR.Hud.toast(DR.Hud.t(DR.Hud.sensor ? "sensorOn" : "sensorOff")); }
     else if ((code === "KeyQ" || code === "KeyE" || code === "KeyX") && S && !DR.Input.held) S.input.trick = code === "KeyQ" ? "rollL" : code === "KeyE" ? "rollR" : "flip";
-    else if ((code === "Enter" || code === "NumpadEnter") && S && S.over && !$("results").hidden) startRound(G.course);
   }
   addEventListener("pointerdown", function () { DR.Audio.wake(); });
 
   function wireButtons() {
-    document.querySelectorAll("[data-course]").forEach(function (b) {
-      b.onclick = function () { DR.Audio.wake(); startRound(b.getAttribute("data-course")); };
-    });
-    $("endAll").onclick = function () { HopLobby.endGame(); };
-    $("backLobby").onclick = function () { HopLobby.exit(); };
+    // No buttons of our own any more: HopLobby runs the lobby, results and rematch.
   }
 
   // ------------------------------------------------------------------ the loop
@@ -121,6 +212,7 @@ globalThis.DR = globalThis.DR || {};
     if (G.autopilot && me && S.phase() === "hunt") Object.assign(S.input, DR.Sim.botInput(S, me));
     DR.Sim.step(S, h);
     DR.Net.step(S, h);
+    if (S.over && !G.ended) endRound();
     react(S);
     S.events.length = 0;
   }
