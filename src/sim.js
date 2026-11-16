@@ -14,7 +14,8 @@ globalThis.DR = globalThis.DR || {};
 
   const CFG = DR.CFG = {
     // flight
-    cruise: 30, brake: 16, turn: 1.75, brakeTurn: 1.45, climb: 14, accel: 22, decel: 34, clearance: 1.2,
+    cruise: 30, brake: 16, turn: 1.55, brakeTurn: 1.45, climb: 14, accel: 22, decel: 34, clearance: 1.2,
+    steerIn: 3.2, steerOut: 5.5, climbRate: 18,   // how fast a turn / a climb builds up (higher = snappier)
     camTilt: 0.28,                      // the FPV camera and the guns point this far above the nose
     // round: the intro is the walk-out and hand launch (view.js times its shots to these)
     intro: 7.5, count: 3, round: 180, liftoff: 1.2, maxPilots: 8, hover: 3.2,
@@ -123,7 +124,11 @@ globalThis.DR = globalThis.DR || {};
     if (inp.brake) target = CFG.brake;
     if (ht < CFG.liftoff && !r.late) target *= U.ease(ht / CFG.liftoff);
     r.speed = U.approach(r.speed, target, (target > r.speed ? CFG.accel : CFG.decel) * dt);
-    r.steerS = U.approach(r.steerS, U.clamp(inp.steer, -1, 1), 6 * dt);
+    // Smooth steering: the turn eases in (and out) instead of snapping to full rate,
+    // so a small nudge is a small, gentle correction. Letting go settles a bit faster.
+    const want = U.clamp(inp.steer, -1, 1);
+    const ease = Math.abs(want) > Math.abs(r.steerS) && want * r.steerS >= 0 ? CFG.steerIn : CFG.steerOut;
+    r.steerS += (want - r.steerS) * (1 - Math.exp(-ease * dt));
     r.yaw = U.wrap(r.yaw + CFG.turn * r.steerS * (inp.brake ? CFG.brakeTurn : 1) * dt);
     // Tricks: a barrel roll throws you sideways, a flip pops you up; both spin the drone.
     r.trickCd = Math.max(0, r.trickCd - dt);
@@ -139,7 +144,7 @@ globalThis.DR = globalThis.DR || {};
     r.sideV = U.approach(r.sideV, 0, 45 * dt);
     let climb = U.clamp(inp.climb, -1, 1);
     const ground0 = T.terrain(r.x, r.z);
-    r.vy = U.approach(r.vy, climb * CFG.climb, (r.trick === "flip" ? 24 : 30) * dt);
+    r.vy = U.approach(r.vy, climb * CFG.climb, (r.trick === "flip" ? 24 : CFG.climbRate) * dt);
     const rx = -U.fwdZ(r.yaw), rz = U.fwdX(r.yaw);   // to the drone's right
     let nx = r.x + U.fwdX(r.yaw) * r.speed * dt + rx * r.sideV * dt;
     let nz = r.z + U.fwdZ(r.yaw) * r.speed * dt + rz * r.sideV * dt;

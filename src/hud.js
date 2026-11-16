@@ -137,7 +137,8 @@ globalThis.DR = globalThis.DR || {};
   };
   H.waiting = function (text) { const w = $("wait"); w.hidden = !text; if (text) w.textContent = text; };
   // The course picker (host / solo) before a round.
-  H.menu = function (show) { $("menu").hidden = !show; if (show) { $("results").hidden = true; $("wait").hidden = true; } };
+  // The course is a lobby option now (HopLobby's Match settings): no picker of our own.
+  H.menu = function () { $("menu").hidden = true; };
 
   // ------------------------------------------------------------------ minimap
   let mapBase = null, mapT = null;
@@ -376,11 +377,11 @@ globalThis.DR = globalThis.DR || {};
           row.append(pl, img, nm, sc);
           body.append(row);
         });
-        const host = !net || !net.isClient();
-        $("resPick").hidden = !host;
-        $("endAll").hidden = !(net && net.isHost());
-        $("resWait").hidden = host;
-        $("backLobby").hidden = !!(net && net.isHost());
+        // No buttons: HopLobby's own results screen and rematch window take over.
+        $("resPick").hidden = true;
+        $("endAll").hidden = true;
+        $("resWait").hidden = true;
+        $("backLobby").hidden = true;
       }
     }
     if (!S.over && !$("results").hidden) $("results").hidden = true;

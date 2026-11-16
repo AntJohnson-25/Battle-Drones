@@ -27,7 +27,7 @@ globalThis.DR = globalThis.DR || {};
 
   // ------------------------------------------------------------------ controller
   const P = { x: 0, y: 0, fire: false, brake: false, prev: [], navT: 0, focus: -1 };
-  const DEAD = 0.18;
+  const DEAD = 0.2;
   // Pad button -> the key it stands in for (pressed once).
   const TAP = { 4: "KeyQ", 5: "KeyE", 3: "KeyX", 2: "KeyC", 12: "KeyO", 13: "KeyI", 8: "KeyM" };
   function dead(v) { const a = Math.abs(v); return a < DEAD ? 0 : Math.sign(v) * (a - DEAD) / (1 - DEAD); }
@@ -98,12 +98,17 @@ globalThis.DR = globalThis.DR || {};
   };
 
   const k = function (a, b) { return I.keys.has(a) || I.keys.has(b); };
+  // Steering sensitivity (HopLobby menu): 0.5 gentle .. 1.5 twitchy. Default is calm.
+  I.sens = 1;
+  // Stick response curve: small pushes give small turns, full push still gives full.
+  function curve(v) { return Math.sign(v) * Math.pow(Math.abs(v), 1.8); }
   // Fill the race's input from the keys and the pad.
   I.read = function (inp) {
     if (I.held) { inp.steer = 0; inp.climb = 0; inp.brake = false; inp.fire = false; return; }
     inp.fire = k("Space", "KeyJ") || P.fire;
-    inp.steer = U1((k("ArrowLeft", "KeyA") ? 1 : 0) - (k("ArrowRight", "KeyD") ? 1 : 0) - P.x);
-    const c = U1((k("ArrowUp", "KeyW") ? 1 : 0) - (k("ArrowDown", "KeyS") ? 1 : 0) - P.y);
+    const ks = (k("ArrowLeft", "KeyA") ? 1 : 0) - (k("ArrowRight", "KeyD") ? 1 : 0);
+    inp.steer = U1((ks - curve(P.x)) * I.sens);
+    const c = U1(((k("ArrowUp", "KeyW") ? 1 : 0) - (k("ArrowDown", "KeyS") ? 1 : 0) - curve(P.y)) * Math.min(1, I.sens + 0.2));
     inp.climb = I.invert ? -c : c;
     inp.brake = k("ShiftLeft", "ShiftRight") || P.brake;
   };
